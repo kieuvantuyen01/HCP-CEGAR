@@ -3,6 +3,7 @@ use crate::graph::Graph;
 use crate::macro_splicer::{splice_macro_tour, verify_tour_on_raw_graph};
 use crate::pinpointed_strip_solver::PinpointedStripSolver;
 use crate::two_tier_decomposer::decompose_graph;
+use crate::solver_outcome::SolverOutcome;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::Write;
@@ -35,7 +36,7 @@ pub fn write_hcp_tour(tour: &[i32], output_path: &str) -> std::io::Result<()> {
         }
     }
     let mut file = File::create(output_path)?;
-    writeln!(file, "NAME : graph950.hcp.tour")?;
+    writeln!(file, "NAME : hcp-solution")?;
     writeln!(file, "TYPE : TOUR")?;
     writeln!(file, "DIMENSION : {}", tour.len())?;
     writeln!(file, "TOUR_SECTION")?;
@@ -54,7 +55,7 @@ pub fn write_hcp_tour(tour: &[i32], output_path: &str) -> std::io::Result<()> {
 /// 4. splice_macro_tour + patch_cycles_2opt
 /// 5. Indicator Cut-Crossing SECs on subtours
 /// 6. Independent tour certification & output to HCP format
-pub fn solve_graph_two_tier(g: &Graph, options: &TwoTierSolverOptions) -> Option<Vec<i32>> {
+pub fn solve_graph_two_tier(g: &Graph, options: &TwoTierSolverOptions) -> SolverOutcome {
     let start_time = Instant::now();
     println!("=== Starting Two-Tier Demand-Coordinated Solver in Rust ===");
 
@@ -83,7 +84,10 @@ pub fn solve_graph_two_tier(g: &Graph, options: &TwoTierSolverOptions) -> Option
                 "[TIMEOUT] Reached global {:.1}s limit at iteration {}",
                 options.timeout_secs, outer_it
             );
-            return None;
+            return SolverOutcome::unknown(format!(
+                "cooperative timeout at outer iteration {}",
+                outer_it
+            ));
         }
 
         if outer_it % 10 == 1 || outer_it <= 5 {
@@ -93,7 +97,7 @@ pub fn solve_graph_two_tier(g: &Graph, options: &TwoTierSolverOptions) -> Option
         let assignment = coordinator.solve_assignment();
         if assignment.is_none() {
             println!("Coordinator returned UNSAT: search space exhausted.");
-            return None;
+            return SolverOutcome::Unsat;
         }
 
         let (hh_edges, strip_demands) = assignment.unwrap();
@@ -111,7 +115,10 @@ pub fn solve_graph_two_tier(g: &Graph, options: &TwoTierSolverOptions) -> Option
         for (si, s) in decomp.strips.iter().enumerate() {
             if start_time.elapsed().as_secs_f64() > options.timeout_secs {
                 println!("[TIMEOUT] Global timeout reached during strip solving.");
-                return None;
+                return SolverOutcome::unknown(format!(
+                    "cooperative timeout while solving strip {} at outer iteration {}",
+                    si, outer_it
+                ));
             }
 
             let dem = strip_demands.get(&si).cloned().unwrap_or_default();
@@ -191,23 +198,21 @@ pub fn solve_graph_two_tier(g: &Graph, options: &TwoTierSolverOptions) -> Option
             );
             if verify_tour_on_raw_graph(tour, g) {
                 println!("CERTIFICATION PASSED: Verified tour independently on raw graph G!");
-                let out_path = options
-                    .output_path
-                    .as_deref()
-                    .unwrap_or("scratch/graph950/found_tour_rust.hcp");
-                if let Err(e) = write_hcp_tour(tour, out_path) {
-                    eprintln!("Warning: failed to write tour to {}: {}", out_path, e);
-                } else {
-                    println!("Wrote certified tour to {}", out_path);
+                if let Some(out_path) = options.output_path.as_deref() {
+                    if let Err(e) = write_hcp_tour(tour, out_path) {
+                        eprintln!("Warning: failed to write tour to {}: {}", out_path, e);
+                    } else {
+                        println!("Wrote certified tour to {}", out_path);
+                    }
                 }
                 println!(
                     "Total time elapsed: {:.2}s",
                     start_time.elapsed().as_secs_f64()
                 );
-                return Some(tour.clone());
+                return SolverOutcome::sat(tour.clone());
             } else {
                 eprintln!("Verification on raw graph failed.");
-                return None;
+                return SolverOutcome::error("independent tour verification failed");
             }
         } else {
             if !cycles.is_empty() {
@@ -233,5 +238,8 @@ pub fn solve_graph_two_tier(g: &Graph, options: &TwoTierSolverOptions) -> Option
         }
     }
 
-    None
+    SolverOutcome::unknown(format!(
+        "maximum outer-iteration limit ({}) reached",
+        options.max_iterations
+    ))
 }

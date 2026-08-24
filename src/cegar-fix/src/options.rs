@@ -243,7 +243,34 @@ pub fn get_options() -> clap::ArgMatches {
                 .help("Output HCP tour file path (default: scratch/graph950/found_tour_rust.hcp)")
                 .takes_value(true),
         )
+        .arg(feature_arg("degree2-triangle-prune", "Prune degree-2 triangle shortcut edges"))
+        .arg(feature_arg("degree2-contraction", "Contract maximal degree-2 paths"))
+        .arg(feature_arg("global-short-cuts", "Add global triangle and 4-cycle cuts"))
+        .arg(feature_arg("short-cycle-sec", "Add enhanced SEC clauses for short CEGAR subcycles"))
+        .arg(feature_arg("cluster-cuts", "Add dense cluster cut constraints"))
+        .arg(feature_arg("modular-prepass", "Run modular-decomposition prepass"))
+        .arg(feature_arg("hub-partition-prepass", "Run hub-partitioned sub-HCP prepass"))
+        .arg(feature_arg("hub-patcher", "Run hub-aware cycle patcher"))
+        .arg(feature_arg("matching-patcher", "Run matching cycle patcher"))
+        .arg(feature_arg("chained-lk", "Run chained Lin-Kernighan patcher"))
+        .arg(feature_arg("ils-patcher", "Run iterated-local-search patcher"))
+        .arg(feature_arg("macro-patcher", "Run macro-graph patcher"))
+        .arg(
+            Arg::with_name("telemetry")
+                .long("telemetry")
+                .value_name("0|1")
+                .help("Emit machine-readable per-phase metric lines (default: 0)")
+                .takes_value(true),
+        )
         .get_matches();
+}
+
+fn feature_arg(name: &'static str, help: &'static str) -> Arg<'static> {
+    Arg::with_name(name)
+        .long(name)
+        .value_name("0|1")
+        .help(help)
+        .takes_value(true)
 }
 
 

@@ -18,6 +18,40 @@ use crate::ils_patcher::IteratedLocalSearchPatcher;
 use crate::macro_solver::MacroGraphSolver;
 use crate::hub_sub_hcp::HubPartitionedSolver;
 use crate::modular_solver::ModularSolver;
+use crate::solver_outcome::SolverOutcome;
+
+#[derive(Clone, Debug)]
+pub struct SolverFeatures {
+    pub global_short_cuts: bool,
+    pub short_cycle_sec: bool,
+    pub cluster_cuts: bool,
+    pub modular_prepass: bool,
+    pub hub_partition_prepass: bool,
+    pub hub_patcher: bool,
+    pub matching_patcher: bool,
+    pub chained_lk: bool,
+    pub ils_patcher: bool,
+    pub macro_patcher: bool,
+    pub telemetry: bool,
+}
+
+impl Default for SolverFeatures {
+    fn default() -> Self {
+        Self {
+            global_short_cuts: true,
+            short_cycle_sec: true,
+            cluster_cuts: true,
+            modular_prepass: true,
+            hub_partition_prepass: true,
+            hub_patcher: true,
+            matching_patcher: true,
+            chained_lk: true,
+            ils_patcher: true,
+            macro_patcher: true,
+            telemetry: false,
+        }
+    }
+}
 
 
 /// Pre-emptively forbids 3-cycles (triangles) and 4-cycles in the initial CNF encoding in O(|E| * Delta).
@@ -234,7 +268,7 @@ pub fn add_cluster_cut_constraints(
     added_clauses
 }
 
-pub fn solve_hamilton(g:Graph, contractor: &Degree2Contractor, hub_registry: &HubRegistry, _s:i32, encode_method:i32, block_method: i32,symmetry: i32 ,opt:i32,loop_prohibition: i32,cnf_normalize:i32,balanced:i32,dearcify:i32, cadical_config:i32, degree_order:i32, arcs_order:i32, three_opt:i32, _cegar_fallback:i32, _mtz_stall:i32, _adaptive_escalation:i32, _sub_hcp_timeout: u64, _max_cluster_size: usize, timeout_secs: f64, instant:Instant,output_folder:&str) {
+pub fn solve_hamilton(g:Graph, contractor: &Degree2Contractor, hub_registry: &HubRegistry, _s:i32, encode_method:i32, block_method: i32,symmetry: i32 ,opt:i32,loop_prohibition: i32,cnf_normalize:i32,balanced:i32,dearcify:i32, cadical_config:i32, degree_order:i32, arcs_order:i32, three_opt:i32, cegar_fallback:i32, mtz_stall:i32, adaptive_escalation:i32, sub_hcp_timeout: u64, max_cluster_size: usize, timeout_secs: f64, instant:Instant,output_folder:&str, features: &SolverFeatures) -> SolverOutcome {
     let now = instant.elapsed();
     let mut encoder = Encoder::new();
     // グラフをcnf形式に変形し、cnfへ格納
@@ -248,14 +282,14 @@ pub fn solve_hamilton(g:Graph, contractor: &Degree2Contractor, hub_registry: &Hu
         }
     }
     // Add global short-cycle cuts (triangles and 4-cycles)
-    if loop_prohibition >= 1 || hub_registry.hub_vertices.len() >= 3 {
+    if features.global_short_cuts && (loop_prohibition >= 1 || hub_registry.hub_vertices.len() >= 3) {
         let added_cuts = add_global_short_cycle_cuts(&g, &encoder, &mut cnf, 4);
         if added_cuts > 0 {
             println!("added global short-cycle cuts = {}", added_cuts);
         }
     }
     // Add cluster cut constraints for CaDiCaL satellite space pruning
-    if hub_registry.hub_vertices.len() >= 5 {
+    if features.cluster_cuts && hub_registry.hub_vertices.len() >= 5 {
         let added_cluster_cuts = add_cluster_cut_constraints(&g, &encoder, &mut cnf);
         if added_cluster_cuts > 0 {
             println!("added cluster cut constraints = {}", added_cluster_cuts);
@@ -300,8 +334,16 @@ pub fn solve_hamilton(g:Graph, contractor: &Degree2Contractor, hub_registry: &Hu
         println!("encodhing clauses number = {}",cnf.len());
         let _ = solver.add_cnf(cnf);
     }
+    let timeout_origin = instant;
+    solver.attach_terminator(move || {
+        if timeout_origin.elapsed().as_secs_f64() >= timeout_secs {
+            ControlSignal::Terminate
+        } else {
+            ControlSignal::Continue
+        }
+    });
     // cegar関数により、解を求め、increment数と追加したblock節の合計を返す
-    let (increment, block) = cegar(
+    let (outcome, increment, block) = cegar(
         &mut encoder,
         solver,
         0,
@@ -315,22 +357,20 @@ pub fn solve_hamilton(g:Graph, contractor: &Degree2Contractor, hub_registry: &Hu
         instant,
         cnf_normalize,
         balanced,
+        cegar_fallback,
+        mtz_stall,
+        adaptive_escalation,
+        sub_hcp_timeout,
+        max_cluster_size,
         timeout_secs,
         instant.elapsed(),
         current_cnf,
         output_folder,
+        features,
     );
     println!("overall incremented number = {}", increment);
     println!("overall number of added block clauses = {}", block);
-}
-
-fn print_tour(tour: &[i32], contractor: &Degree2Contractor) {
-    let final_tour = contractor.uncontract_cycle(tour);
-    let line = final_tour.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(" ");
-    println!();
-    println!("solution: ");
-    println!("{}\n", line);
-    println!("s SATISFIABLE");
+    outcome
 }
 
 fn cegar(
@@ -347,49 +387,84 @@ fn cegar(
     instant: Instant,
     cnf_normalize: i32,
     balanced: i32,
+    cegar_fallback: i32,
+    mtz_stall: i32,
+    adaptive_escalation: i32,
+    sub_hcp_timeout: u64,
+    max_cluster_size: usize,
     timeout_secs: f64,
     mut previous_time: Duration,
     mut previous_cnf: Cnf,
     output_folder: &str,
-) -> (i32, i32) {
+    features: &SolverFeatures,
+) -> (SolverOutcome, i32, i32) {
     // Attempt Modular Macro-Decomposition when dense hubs are detected
-    if hub_registry.hub_vertices.len() >= 5 {
+    if features.modular_prepass && hub_registry.hub_vertices.len() >= 5 {
         if let Some(tour) = ModularSolver::solve_via_modular_decomposition(&g, contractor, hub_registry) {
-            println!("s SATISFIABLE (via Modular Macro-Decomposition)");
-            println!("overall incremented number = 0");
-            print_tour(&tour, contractor);
-            return (0, 0);
+            println!("solution source = modular macro-decomposition");
+            return (SolverOutcome::sat(contractor.uncontract_cycle(&tour)), 0, 0);
         }
     }
 
     // Attempt Hub-Partitioned Divide-and-Conquer for Dense Hub Graphs
-    if !hub_registry.hub_vertices.is_empty() && hub_registry.hub_vertices.len() >= 3 {
+    if features.hub_partition_prepass && hub_registry.hub_vertices.len() >= 3 {
         if let Some(partition_tour) = HubPartitionedSolver::solve_via_hub_partition(&g, contractor, hub_registry) {
             if partition_tour.len() == g.adjacency_list.len() {
                 println!("number of subcycles found = 1 (via hub-partitioned sub-hcp)");
-                let final_tour = contractor.uncontract_cycle(&partition_tour);
-                let line = final_tour.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(" ");
                 let time = instant.elapsed();
                 println!("overall time = {:?}", time);
-                println!();
-                println!("solution: ");
-                println!("{}\n", line);
-                println!("s SATISFIABLE");
-                return (0, 0);
+                return (
+                    SolverOutcome::sat(contractor.uncontract_cycle(&partition_tour)),
+                    0,
+                    0,
+                );
             }
         }
     }
 
+    let mut stall_count = 0i32;
+    let mut previous_remaining_cycles = 0usize;
+
     loop {
         if instant.elapsed().as_secs_f64() >= timeout_secs {
-            println!("\ns UNKNOWN (TIMEOUT: {:.2}s reached >= {:.2}s limit)", instant.elapsed().as_secs_f64(), timeout_secs);
-            return (count, clause_count);
+            return (
+                SolverOutcome::unknown(format!(
+                    "cooperative timeout: {:.2}s reached {:.2}s limit",
+                    instant.elapsed().as_secs_f64(),
+                    timeout_secs
+                )),
+                count,
+                clause_count,
+            );
         }
 
         // SATソルバーで解を求める
-        let res = solver.solve().unwrap();
+        let res = match solver.solve() {
+            Ok(result) => result,
+            Err(error) => {
+                return (
+                    SolverOutcome::error(format!("CaDiCaL solve error: {:?}", error)),
+                    count,
+                    clause_count,
+                );
+            }
+        };
         let now = instant.elapsed();
         let sat_solving_time = now - previous_time;
+
+        if features.telemetry {
+            println!(
+                "c solver_stats iteration={} conflicts={} decisions={} propagations={} clauses={} variables={} avg_clause_len={:.6} cpu_solve_seconds={:.9}",
+                count,
+                solver.conflicts(),
+                solver.decisions(),
+                solver.propagations(),
+                solver.n_clauses(),
+                solver.n_vars(),
+                solver.avg_clause_len(),
+                solver.cpu_solve_time().as_secs_f64(),
+            );
+        }
 
         println!();
         println!("Increment...");
@@ -399,7 +474,16 @@ fn cegar(
         // 解がSATならば、ハミルトン閉路になっているかを調べる
         if res == SolverResult::Sat {
             // 変数の値割り当て
-            let sol = solver.full_solution().unwrap();
+            let sol = match solver.full_solution() {
+                Ok(solution) => solution,
+                Err(error) => {
+                    return (
+                        SolverOutcome::error(format!("failed to read CaDiCaL model: {:?}", error)),
+                        count,
+                        clause_count,
+                    );
+                }
+            };
             // どの辺が選択されたかの解析
             let sol_arcs = get_solution_arcs(sol, &encoder.graph_lit_map);
             // 閉路
@@ -409,12 +493,7 @@ fn cegar(
             if sol_cycles.len() == 1 {
                 let flat: Vec<i32> = sol_cycles.into_iter().flatten().collect();
                 let full_cycle = contractor.uncontract_cycle(&flat);
-                let line = full_cycle.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(" ");
-                println!();
-                println!("solution: ");
-                println!("{}\n", line);
-                println!("s SATISFIABLE");
-                return (count, clause_count);
+                return (SolverOutcome::sat(full_cycle), count, clause_count);
             } else {
                 println!("number of subcycles found = {}", sol_cycles.len());
                 println!("sat solution cycle lengths map (length:number) = {:?}", map_cycle_lengths(&sol_cycles));
@@ -422,23 +501,21 @@ fn cegar(
                 let raw_sol_cycles = sol_cycles.clone();
 
                 // Attempt Multi-Subcycle Hub Patching
-                let sol_cycles = if sol_cycles.len() > 1 && !hub_registry.hub_vertices.is_empty() {
+                let sol_cycles = if features.hub_patcher && sol_cycles.len() > 1 && !hub_registry.hub_vertices.is_empty() {
+                    let phase_start = Instant::now();
+                    let before = sol_cycles.len();
                     let patched = HubPatcher::patch_cycles_via_hubs(&sol_cycles, &g, contractor, hub_registry);
+                    print_phase_metric(features, "hub_patcher", count, phase_start.elapsed(), before, patched.len());
                     if patched.len() == 1 && patched[0].len() == g.adjacency_list.len() {
                         println!("number of subcycles found = 1 (via hub patching)");
                         let flat: Vec<i32> = patched.into_iter().flatten().collect();
                         let final_tour = contractor.uncontract_cycle(&flat);
-                        let line = final_tour.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(" ");
                         let time = now - previous_time;
                         let add_block_clauses_time = now - previous_time - sat_solving_time;
                         println!("number of added block clauses = {}", clause_count);
                         println!("add block clauses time = {:?}", add_block_clauses_time);
                         println!("increment time = {:?}", time);
-                        println!();
-                        println!("solution: ");
-                        println!("{}\n", line);
-                        println!("s SATISFIABLE");
-                        return (count, clause_count);
+                        return (SolverOutcome::sat(final_tour), count, clause_count);
                     }
                     patched
                 } else {
@@ -446,23 +523,21 @@ fn cegar(
                 };
 
                 // Attempt Maximum Matching Global Patching on remaining subcycles
-                let sol_cycles = if sol_cycles.len() > 1 {
+                let sol_cycles = if features.matching_patcher && sol_cycles.len() > 1 {
+                    let phase_start = Instant::now();
+                    let before = sol_cycles.len();
                     let patched = MatchingPatcher::patch_cycles_via_matching(&sol_cycles, &g, contractor, hub_registry);
+                    print_phase_metric(features, "matching_patcher", count, phase_start.elapsed(), before, patched.len());
                     if patched.len() == 1 && patched[0].len() == g.adjacency_list.len() {
                         println!("number of subcycles found = 1 (via matching patching)");
                         let flat: Vec<i32> = patched.into_iter().flatten().collect();
                         let final_tour = contractor.uncontract_cycle(&flat);
-                        let line = final_tour.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(" ");
                         let time = now - previous_time;
                         let add_block_clauses_time = now - previous_time - sat_solving_time;
                         println!("number of added block clauses = {}", clause_count);
                         println!("add block clauses time = {:?}", add_block_clauses_time);
                         println!("increment time = {:?}", time);
-                        println!();
-                        println!("solution: ");
-                        println!("{}\n", line);
-                        println!("s SATISFIABLE");
-                        return (count, clause_count);
+                        return (SolverOutcome::sat(final_tour), count, clause_count);
                     }
                     patched
                 } else {
@@ -470,23 +545,21 @@ fn cegar(
                 };
 
                 // Attempt Chained k-Opt / Lin-Kernighan Variable-Depth Patching
-                let sol_cycles = if sol_cycles.len() > 1 {
+                let sol_cycles = if features.chained_lk && sol_cycles.len() > 1 {
+                    let phase_start = Instant::now();
+                    let before = sol_cycles.len();
                     let patched = ChainedLKSolver::patch_cycles_via_chained_lk(&sol_cycles, &g, contractor, hub_registry, 6);
+                    print_phase_metric(features, "chained_lk", count, phase_start.elapsed(), before, patched.len());
                     if patched.len() == 1 && patched[0].len() == g.adjacency_list.len() {
                         println!("number of subcycles found = 1 (via chained lk patching)");
                         let flat: Vec<i32> = patched.into_iter().flatten().collect();
                         let final_tour = contractor.uncontract_cycle(&flat);
-                        let line = final_tour.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(" ");
                         let time = now - previous_time;
                         let add_block_clauses_time = now - previous_time - sat_solving_time;
                         println!("number of added block clauses = {}", clause_count);
                         println!("add block clauses time = {:?}", add_block_clauses_time);
                         println!("increment time = {:?}", time);
-                        println!();
-                        println!("solution: ");
-                        println!("{}\n", line);
-                        println!("s SATISFIABLE");
-                        return (count, clause_count);
+                        return (SolverOutcome::sat(final_tour), count, clause_count);
                     }
                     patched
                 } else {
@@ -494,23 +567,21 @@ fn cegar(
                 };
 
                 // Attempt Iterated Local Search (ILS) with Double-Bridge Kicks
-                let sol_cycles = if sol_cycles.len() > 1 {
+                let sol_cycles = if features.ils_patcher && sol_cycles.len() > 1 {
+                    let phase_start = Instant::now();
+                    let before = sol_cycles.len();
                     let patched = IteratedLocalSearchPatcher::solve_via_ils(&sol_cycles, &g, contractor, hub_registry, 200);
+                    print_phase_metric(features, "ils_patcher", count, phase_start.elapsed(), before, patched.len());
                     if patched.len() == 1 && patched[0].len() == g.adjacency_list.len() {
                         println!("number of subcycles found = 1 (via ils patching)");
                         let flat: Vec<i32> = patched.into_iter().flatten().collect();
                         let final_tour = contractor.uncontract_cycle(&flat);
-                        let line = final_tour.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(" ");
                         let time = now - previous_time;
                         let add_block_clauses_time = now - previous_time - sat_solving_time;
                         println!("number of added block clauses = {}", clause_count);
                         println!("add block clauses time = {:?}", add_block_clauses_time);
                         println!("increment time = {:?}", time);
-                        println!();
-                        println!("solution: ");
-                        println!("{}\n", line);
-                        println!("s SATISFIABLE");
-                        return (count, clause_count);
+                        return (SolverOutcome::sat(final_tour), count, clause_count);
                     }
                     patched
                 } else {
@@ -518,53 +589,131 @@ fn cegar(
                 };
 
                 // Attempt Macro-Graph Hierarchical Contraction Solver
-                if sol_cycles.len() > 1 {
+                if features.macro_patcher && sol_cycles.len() > 1 {
+                    let phase_start = Instant::now();
                     if let Some(macro_tour) = MacroGraphSolver::solve_via_macro_graph(&sol_cycles, &g, contractor, hub_registry) {
+                        print_phase_metric(features, "macro_patcher", count, phase_start.elapsed(), sol_cycles.len(), 1);
                         if macro_tour.len() == g.adjacency_list.len() {
                             println!("number of subcycles found = 1 (via macro-graph solver)");
                             let final_tour = contractor.uncontract_cycle(&macro_tour);
-                            let line = final_tour.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(" ");
                             let time = now - previous_time;
                             let add_block_clauses_time = now - previous_time - sat_solving_time;
                             println!("number of added block clauses = {}", clause_count);
                             println!("add block clauses time = {:?}", add_block_clauses_time);
                             println!("increment time = {:?}", time);
-                            println!();
-                            println!("solution: ");
-                            println!("{}\n", line);
-                            println!("s SATISFIABLE");
-                            return (count, clause_count);
+                            return (SolverOutcome::sat(final_tour), count, clause_count);
                         }
+                    } else {
+                        print_phase_metric(features, "macro_patcher", count, phase_start.elapsed(), sol_cycles.len(), sol_cycles.len());
                     }
                 }
 
 
                 // 2-opt / 3-opt solution constructor
-                let (block_clauses, _active_cycles) = if opt == 0 {
-                    (get_blocking_clauses(&raw_sol_cycles, encoder, &g, block_method, balanced), raw_sol_cycles.clone())
+                let (effective_three_opt, effective_fallback) = if adaptive_escalation == 1 {
+                    if stall_count < 3 {
+                        (0, 0)
+                    } else if stall_count < 6 {
+                        (1, 0)
+                    } else {
+                        (1, 1)
+                    }
+                } else {
+                    (three_opt, cegar_fallback)
+                };
+
+                let phase_start = Instant::now();
+                let (mut block_clauses, mut active_cycles) = if opt == 0 {
+                    (get_blocking_clauses(&raw_sol_cycles, encoder, &g, block_method, balanced, features.short_cycle_sec), raw_sol_cycles.clone())
                 } else if opt >= 1 {
-                    let (clauses, cycles) = two_opt(&raw_sol_cycles, encoder, &g, contractor, hub_registry, block_method, balanced, opt, three_opt);
+                    let (clauses, cycles) = two_opt(&raw_sol_cycles, encoder, &g, contractor, hub_registry, block_method, balanced, opt, effective_three_opt, features.short_cycle_sec);
                     if cycles.len() == 1 && cycles[0].len() == g.adjacency_list.len() {
                         let flat: Vec<i32> = cycles.into_iter().flatten().collect();
                         let full_cycle = contractor.uncontract_cycle(&flat);
-                        let line = full_cycle.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(" ");
                         let now = instant.elapsed();
                         let time = now - previous_time;
                         let add_block_clauses_time = now - previous_time - sat_solving_time;
                         println!("number of added block clauses = {}", clause_count);
                         println!("add block clauses time = {:?}", add_block_clauses_time);
                         println!("increment time = {:?}", time);
-                        println!();
                         println!("hamiltonian cycle found by 2-opt/3-opt");
-                        println!("solution: ");
-                        println!("{}\n", line);
-                        println!("s SATISFIABLE");
-                        return (count, clause_count);
+                        return (SolverOutcome::sat(full_cycle), count, clause_count);
                     }
                     (clauses, cycles)
                 } else {
                     panic!("2-opt option \n-t 0:2-opt off\n-t 1,2,3:2-opt on");
                 };
+
+                print_phase_metric(features, "two_three_opt", count, phase_start.elapsed(), raw_sol_cycles.len(), active_cycles.len());
+
+                if effective_fallback == 1 && active_cycles.len() > 1 {
+                    let fallback = get_blocking_clauses(
+                        &active_cycles,
+                        encoder,
+                        &g,
+                        0,
+                        balanced,
+                        false,
+                    );
+                    println!("hard fallback clauses added = {}", fallback.len());
+                    block_clauses.extend(fallback);
+                }
+
+                if previous_remaining_cycles > 0 && active_cycles.len() >= previous_remaining_cycles {
+                    stall_count += 1;
+                } else {
+                    stall_count = 0;
+                }
+                previous_remaining_cycles = active_cycles.len();
+
+                if adaptive_escalation == 1 && stall_count >= 9 && active_cycles.len() > 1 {
+                    let phase_start = Instant::now();
+                    let before = active_cycles.len();
+                    let (merged, new_cycles) = crate::parallel_sub_hcp::solve_parallel_clusters(
+                        &active_cycles,
+                        &g,
+                        max_cluster_size,
+                        sub_hcp_timeout,
+                    );
+                    print_phase_metric(features, "parallel_sub_hcp", count, phase_start.elapsed(), before, new_cycles.len());
+                    if merged {
+                        active_cycles = new_cycles;
+                        if active_cycles.len() == 1 && active_cycles[0].len() == g.adjacency_list.len() {
+                            let full_cycle = contractor.uncontract_cycle(&active_cycles[0]);
+                            return (SolverOutcome::sat(full_cycle), count, clause_count);
+                        }
+                        block_clauses.extend(get_blocking_clauses(
+                            &active_cycles,
+                            encoder,
+                            &g,
+                            block_method,
+                            balanced,
+                            features.short_cycle_sec,
+                        ));
+                    }
+                    stall_count = 0;
+                }
+
+                let inject_mtz = if adaptive_escalation == 1 {
+                    stall_count >= 6 && active_cycles.len() > 1
+                } else {
+                    mtz_stall > 0 && stall_count >= mtz_stall && active_cycles.len() > 1
+                };
+                if inject_mtz {
+                    if let Some(smallest_cycle) = active_cycles.iter().min_by_key(|cycle| cycle.len()) {
+                        if smallest_cycle.len() <= 100 {
+                            let mtz_clauses = inject_partial_mtz(
+                                smallest_cycle,
+                                &g,
+                                encoder,
+                                g.adjacency_list.len(),
+                            );
+                            println!("partial MTZ clauses added = {}", mtz_clauses.len());
+                            block_clauses.extend(mtz_clauses);
+                            stall_count = 0;
+                        }
+                    }
+                }
 
                 let mut cnf = Cnf::new();
                 cnf.extend(block_clauses);
@@ -596,9 +745,19 @@ fn cegar(
                 println!("add block clauses time = {:?}", add_block_clauses_time);
                 println!("increment time = {:?}", time);
             }
+        } else if res == SolverResult::Unsat {
+            return (SolverOutcome::Unsat, count, clause_count);
         } else {
-            println!("s UNSATISFIABLE");
-            return (count, clause_count);
+            let reason = if instant.elapsed().as_secs_f64() >= timeout_secs {
+                format!("strict in-process timeout reached after {:.2}s", instant.elapsed().as_secs_f64())
+            } else {
+                "CaDiCaL interrupted".to_string()
+            };
+            return (
+                SolverOutcome::unknown(reason),
+                count,
+                clause_count,
+            );
         }
     }
 }
@@ -607,6 +766,26 @@ fn get_solution_arcs(sol:Assignment,lit_map:&BTreeMap<(i32,i32),Lit>) -> Vec<(i3
     let sol_arcs: Vec<(i32,i32)> = lit_map.iter().filter_map(|((u,v), lit)| if sol[lit.var()] == TernaryVal::True { Some((*u,*v)) } else { None }).collect();
     sol_arcs
 
+}
+
+fn print_phase_metric(
+    features: &SolverFeatures,
+    phase: &str,
+    iteration: i32,
+    elapsed: Duration,
+    cycles_before: usize,
+    cycles_after: usize,
+) {
+    if features.telemetry {
+        println!(
+            "c metric phase={} iteration={} seconds={:.9} cycles_before={} cycles_after={}",
+            phase,
+            iteration,
+            elapsed.as_secs_f64(),
+            cycles_before,
+            cycles_after
+        );
+    }
 }
 
 fn get_solution_cycles(sol_arcs: Vec<(i32, i32)>) -> Vec<Vec<i32>> {
@@ -685,6 +864,7 @@ fn two_opt(
     balanced: i32,
     opt: i32,
     three_opt: i32,
+    short_cycle_sec: bool,
 ) -> (Vec<Clause>, Vec<Vec<i32>>) {
     let mut cycles = sol_cycles.to_vec();
     let mut merged = true;
@@ -699,7 +879,7 @@ fn two_opt(
 
     while merged {
         let (_new_block_clauses, new_merged, merged_numbers, new_cycle) =
-            merge_cycles(&cycles, encoder, g, contractor, hub_registry, block_method, balanced, &mut cache_vertex, &active_cycles_number, opt);
+            merge_cycles(&cycles, encoder, g, contractor, hub_registry, block_method, balanced, short_cycle_sec, &mut cache_vertex, &active_cycles_number, opt);
         merged = new_merged;
 
         if merged {
@@ -720,7 +900,7 @@ fn two_opt(
         // Try candidate 3-opt merge when 2-opt cannot merge further
         if !merged && three_opt == 1 && active_cycles_number.len() >= 3 {
             let (_three_block_clauses, three_merged, three_indices, three_cycle) =
-                merge_three_cycles(&cycles, encoder, g, contractor, hub_registry, block_method, balanced, &active_cycles_number);
+                merge_three_cycles(&cycles, encoder, g, contractor, hub_registry, block_method, balanced, short_cycle_sec, &active_cycles_number);
             if three_merged {
                 cycles.push(three_cycle);
                 let (ia, ib, ic) = three_indices;
@@ -750,7 +930,7 @@ fn two_opt(
     let block_clauses = if active_cycles.len() == 1 && active_cycles[0].len() == g.adjacency_list.len() {
         Vec::new()
     } else {
-        get_blocking_clauses(sol_cycles, encoder, g, block_method, balanced)
+        get_blocking_clauses(sol_cycles, encoder, g, block_method, balanced, short_cycle_sec)
     };
 
     println!("number of connected cycles = {}", cycles.len() - sol_cycles.len());
@@ -768,6 +948,7 @@ fn merge_cycles(
     hub_registry: &HubRegistry,
     block_method: i32,
     balanced: i32,
+    short_cycle_sec: bool,
     cache_vertex: &mut HashSet<usize>,
     active_cycles_number: &Vec<usize>,
     opt: i32,
@@ -782,7 +963,7 @@ fn merge_cycles(
 
                 match swap_node(&cycles[left],&cycles[right],&g, contractor, hub_registry){
                     Some(new_cycle) =>{
-                    let new_block_clauses = get_blocking_clauses(&vec!(new_cycle.clone()), encoder, g, block_method, balanced);
+                    let new_block_clauses = get_blocking_clauses(&vec!(new_cycle.clone()), encoder, g, block_method, balanced, short_cycle_sec);
                     return (new_block_clauses,true,(i,j),new_cycle)
                     }
                     None =>{
@@ -992,6 +1173,7 @@ fn merge_three_cycles(
     hub_registry: &HubRegistry,
     block_method: i32,
     balanced: i32,
+    short_cycle_sec: bool,
     active_cycles_number: &Vec<usize>,
 ) -> (Vec<Clause>, bool, (usize, usize, usize), Vec<i32>) {
     let n = active_cycles_number.len();
@@ -1030,7 +1212,7 @@ fn merge_three_cycles(
                 let cj = active_cycles_number[b];
                 let ck = active_cycles_number[c];
                 if let Some(new_cycle) = swap_three_nodes(&cycles[ci], &cycles[cj], &cycles[ck], g, contractor, hub_registry) {
-                    let new_block_clauses = get_blocking_clauses(&vec!(new_cycle.clone()), encoder, g, block_method, balanced);
+                    let new_block_clauses = get_blocking_clauses(&vec!(new_cycle.clone()), encoder, g, block_method, balanced, short_cycle_sec);
                     return (new_block_clauses, true, (a, b, c), new_cycle);
                 }
             }
@@ -1130,6 +1312,7 @@ fn get_blocking_clauses(
     g: &Graph,
     block_method: i32,
     balanced: i32,
+    short_cycle_sec: bool,
 ) -> Vec<Clause> {
     let mut clauses = Vec::new();
     let total_v = g.adjacency_list.len();
@@ -1142,7 +1325,7 @@ fn get_blocking_clauses(
                 clauses.extend(cut_clauses);
 
                 // Technique A2: Induced Subgraph SECs for |C| <= 4
-                if sol_cycle.len() <= 4 {
+                if short_cycle_sec && sol_cycle.len() <= 4 {
                     let sec_clauses = get_induced_subgraph_sec_clauses(sol_cycle, encoder, g);
                     clauses.extend(sec_clauses);
                 }
@@ -1664,6 +1847,7 @@ mod tests_blocking_enhancements {
             0,
             1,
             0,
+            true,
         );
         // All 9 vertices should be merged into a single cycle
         assert_eq!(merged_cycles.len(), 1);
@@ -1775,6 +1959,3 @@ mod tests_blocking_enhancements {
         assert_eq!(added_small, 0, "Must not add cluster cuts when satellite clusters are < 50");
     }
 }
-
-
-

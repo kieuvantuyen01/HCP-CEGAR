@@ -23,11 +23,13 @@ pub mod two_tier_orchestrator;
 pub mod staged_subcycle_filter;
 pub mod dual_cut_generator;
 pub mod staged_lazy_smt_solver;
+mod solver_outcome;
 
 use contraction::Degree2Contractor;
 use hub_registry::HubRegistry;
 use std::time::Instant;
 use log::info;
+use solver_outcome::SolverOutcome;
 
 fn main() {
     env_logger::init();
@@ -59,6 +61,21 @@ fn main() {
     let is_staged_smt = matches.is_present("staged-smt") && matches.value_of("staged-smt").map_or(true, |v| v != "0");
     let timeout_secs = matches.value_of_t::<f64>("timeout").unwrap_or(1800.0);
     let output_tour_path = matches.value_of("output-tour").map(|s| s.to_string());
+    let degree2_triangle_prune = feature_enabled(&matches, "degree2-triangle-prune", true);
+    let degree2_contraction = feature_enabled(&matches, "degree2-contraction", true);
+    let features = hcp_solver::SolverFeatures {
+        global_short_cuts: feature_enabled(&matches, "global-short-cuts", true),
+        short_cycle_sec: feature_enabled(&matches, "short-cycle-sec", true),
+        cluster_cuts: feature_enabled(&matches, "cluster-cuts", true),
+        modular_prepass: feature_enabled(&matches, "modular-prepass", true),
+        hub_partition_prepass: feature_enabled(&matches, "hub-partition-prepass", true),
+        hub_patcher: feature_enabled(&matches, "hub-patcher", true),
+        matching_patcher: feature_enabled(&matches, "matching-patcher", true),
+        chained_lk: feature_enabled(&matches, "chained-lk", true),
+        ils_patcher: feature_enabled(&matches, "ils-patcher", true),
+        macro_patcher: feature_enabled(&matches, "macro-patcher", true),
+        telemetry: feature_enabled(&matches, "telemetry", false),
+    };
     // solver,encodingのオプションを&strで受け取る
     let input_filename = matches.value_of("input").unwrap_or("default");
     let output_foldername = matches.value_of("output").unwrap_or("default");
@@ -66,6 +83,7 @@ fn main() {
     println!("solve {}", input_filename);
     // let g = instance();
     let mut g = file_operations::input_to_graph(input_filename);
+    let raw_g = g.clone();
     if de_arcify != 0{
         g.remove_redundant_arcs();
     }
@@ -73,21 +91,10 @@ fn main() {
         let opt = staged_lazy_smt_solver::StagedLazySmtOptions {
             max_batch_size: 500,
             timeout_secs,
-            output_path: output_tour_path,
+            output_path: output_tour_path.clone(),
         };
-        let res = staged_lazy_smt_solver::solve_staged_lazy_smt(&g, &opt);
-        if let Some(tour) = res {
-            println!("s SATISFIABLE");
-            print!("solution: \n");
-            for v in &tour {
-                print!("{} ", v);
-            }
-            println!();
-            println!("overall time = {:?}", instant.elapsed());
-        } else {
-            println!("s UNSATISFIABLE");
-            println!("overall time = {:?}", instant.elapsed());
-        }
+        let outcome = staged_lazy_smt_solver::solve_staged_lazy_smt(&g, &opt);
+        emit_outcome(outcome, &raw_g, output_tour_path.as_deref(), instant);
         return;
     }
     if is_two_tier {
@@ -95,49 +102,38 @@ fn main() {
             timeout_secs,
             max_iterations: 50_000,
             enable_patching: true,
-            output_path: output_tour_path,
+            output_path: output_tour_path.clone(),
         };
-        let res = two_tier_orchestrator::solve_graph_two_tier(&g, &opt);
-        if let Some(tour) = res {
-            println!("s SATISFIABLE");
-            print!("solution: \n");
-            for v in &tour {
-                print!("{} ", v);
-            }
-            println!();
-            println!("overall time = {:?}", instant.elapsed());
-        } else {
-            println!("s UNSATISFIABLE");
-            println!("overall time = {:?}", instant.elapsed());
-        }
+        let outcome = two_tier_orchestrator::solve_graph_two_tier(&g, &opt);
+        emit_outcome(outcome, &raw_g, output_tour_path.as_deref(), instant);
         return;
     }
     if g.has_articulation_points() {
         println!("Graph has cut-vertex or is disconnected.");
-        println!("s UNSATISFIABLE");
+        emit_outcome(SolverOutcome::Unsat, &raw_g, output_tour_path.as_deref(), instant);
         return;
     }
-    let pruned = g.prune_degree2_triangles();
-    if pruned > 0 {
-        println!("Pruned {} degree-2 triangle shortcut edges", pruned);
+    if degree2_triangle_prune {
+        let pruned = g.prune_degree2_triangles();
+        if pruned > 0 {
+            println!("Pruned {} degree-2 triangle shortcut edges", pruned);
+        }
     }
-    let (contracted_g, contractor) = Degree2Contractor::contract(&g);
+    let (contracted_g, contractor) = if degree2_contraction {
+        Degree2Contractor::contract(&g)
+    } else {
+        (g.clone(), Degree2Contractor::identity(&g))
+    };
 
     if let Some(cycle) = contractor.is_direct_cycle {
         println!("Graph is a single 2-regular Hamiltonian cycle.");
-        print!("solution: \n");
-        for v in &cycle {
-            print!("{} ", v);
-        }
-        println!();
-        println!("s SATISFIABLE");
-        println!("overall time = {:?}", instant.elapsed());
+        emit_outcome(SolverOutcome::sat(cycle), &raw_g, output_tour_path.as_deref(), instant);
         return;
     }
 
     if contractor.is_infeasible {
         println!("Infeasible degree-2 structure detected.");
-        println!("s UNSATISFIABLE");
+        emit_outcome(SolverOutcome::Unsat, &raw_g, output_tour_path.as_deref(), instant);
         return;
     }
 
@@ -164,13 +160,60 @@ fn main() {
     // println!("solver={},encoding={}",solver,encoding);
     // println!("{:?}",g);
     println!("file input time = {:?}", time1);
-    hcp_solver::solve_hamilton(contracted_g, &contractor, &hub_registry, solver, encoding, blocking, symmetry, two_opt, loop_prohibition, cnf_normalize, balanced, de_arcify,config,degree_order,arcs_order,three_opt,cegar_fallback,mtz_stall,adaptive_escalation,sub_hcp_timeout,max_cluster_size,timeout_secs,instant,output_foldername);
+    let outcome = hcp_solver::solve_hamilton(contracted_g, &contractor, &hub_registry, solver, encoding, blocking, symmetry, two_opt, loop_prohibition, cnf_normalize, balanced, de_arcify,config,degree_order,arcs_order,three_opt,cegar_fallback,mtz_stall,adaptive_escalation,sub_hcp_timeout,max_cluster_size,timeout_secs,instant,output_foldername, &features);
     let time2 = instant.elapsed() - time1;
 
     // println!("solving time = {:?} sec",instant2.elapsed().as_secs());
     println!("solving time = {:?}", time2);
-    println!("overall time = {:?}", instant.elapsed());
+    emit_outcome(outcome, &raw_g, output_tour_path.as_deref(), instant);
     info!("プログラム終了");
+}
+
+fn feature_enabled(matches: &clap::ArgMatches, name: &str, default: bool) -> bool {
+    matches
+        .value_of_t::<i32>(name)
+        .map(|value| value != 0)
+        .unwrap_or(default)
+}
+
+fn emit_outcome(
+    outcome: SolverOutcome,
+    raw_graph: &graph::Graph,
+    output_tour_path: Option<&str>,
+    instant: Instant,
+) {
+    match outcome {
+        SolverOutcome::Sat(tour) => {
+            if !macro_splicer::verify_tour_on_raw_graph(&tour, raw_graph) {
+                println!("s ERROR");
+                println!("c reason=independent_tour_verification_failed");
+                println!("overall time = {:?}", instant.elapsed());
+                return;
+            }
+            if let Some(path) = output_tour_path {
+                if let Err(error) = two_tier_orchestrator::write_hcp_tour(&tour, path) {
+                    println!("s ERROR");
+                    println!("c reason=failed_to_write_tour detail={:?}", error);
+                    println!("overall time = {:?}", instant.elapsed());
+                    return;
+                }
+            }
+            println!("solution:");
+            println!("{}", tour.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(" "));
+            println!("c certificate=verified_on_raw_graph vertices={}", tour.len());
+            println!("s SATISFIABLE");
+        }
+        SolverOutcome::Unsat => println!("s UNSATISFIABLE"),
+        SolverOutcome::Unknown(reason) => {
+            println!("s UNKNOWN");
+            println!("c reason={}", reason.replace(' ', "_"));
+        }
+        SolverOutcome::Error(reason) => {
+            println!("s ERROR");
+            println!("c reason={}", reason.replace(' ', "_"));
+        }
+    }
+    println!("overall time = {:?}", instant.elapsed());
 }
 
 fn _instance() -> graph::Graph {

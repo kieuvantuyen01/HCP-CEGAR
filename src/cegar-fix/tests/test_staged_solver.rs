@@ -1,5 +1,6 @@
 use cegar_fix::graph::Graph;
 use cegar_fix::staged_lazy_smt_solver::{solve_staged_lazy_smt, StagedLazySmtOptions};
+use cegar_fix::solver_outcome::SolverOutcome;
 
 #[test]
 fn test_solve_staged_smt_on_simple_cycle() {
@@ -18,9 +19,10 @@ fn test_solve_staged_smt_on_simple_cycle() {
         output_path: None,
     };
 
-    let tour = solve_staged_lazy_smt(&g, &options);
-    assert!(tour.is_some());
-    let t = tour.unwrap();
+    let t = match solve_staged_lazy_smt(&g, &options) {
+        SolverOutcome::Sat(tour) => tour,
+        other => panic!("expected SAT, got {:?}", other),
+    };
     assert_eq!(t.len(), 5);
 }
 
@@ -41,8 +43,8 @@ fn test_solve_staged_smt_unsat_disconnected() {
         output_path: None,
     };
 
-    let tour = solve_staged_lazy_smt(&g, &options);
-    assert!(tour.is_none(), "Disconnected graph should be UNSAT");
+    let outcome = solve_staged_lazy_smt(&g, &options);
+    assert_eq!(outcome, SolverOutcome::Unsat, "Disconnected graph should be UNSAT");
 }
 
 #[test]
@@ -66,9 +68,10 @@ fn test_solve_staged_smt_ladder_graph() {
         output_path: None,
     };
 
-    let tour = solve_staged_lazy_smt(&g, &options);
-    assert!(tour.is_some());
-    let t = tour.unwrap();
+    let t = match solve_staged_lazy_smt(&g, &options) {
+        SolverOutcome::Sat(tour) => tour,
+        other => panic!("expected SAT, got {:?}", other),
+    };
     assert_eq!(t.len(), 8);
 }
 
@@ -101,6 +104,6 @@ fn test_solve_staged_smt_petersen_subgraph() {
         output_path: None,
     };
 
-    let tour = solve_staged_lazy_smt(&g, &options);
-    assert!(tour.is_none(), "Petersen graph is hypohamiltonian and must be UNSAT");
+    let outcome = solve_staged_lazy_smt(&g, &options);
+    assert_eq!(outcome, SolverOutcome::Unsat, "Petersen graph is hypohamiltonian and must be UNSAT");
 }

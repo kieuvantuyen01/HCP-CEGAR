@@ -17,3 +17,4 @@ __pycache__/
 *.log.gz
 *.gz
 *.swp
+benchmark-runs/

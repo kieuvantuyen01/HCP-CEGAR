@@ -10,6 +10,18 @@ pub struct Degree2Contractor {
 }
 
 impl Degree2Contractor {
+    /// Creates a no-op contractor for controlled ablation experiments.
+    pub fn identity(g: &Graph) -> Degree2Contractor {
+        let total_v = g.adjacency_list.len();
+        Degree2Contractor {
+            chain_map: HashMap::new(),
+            original_vertices_count: total_v,
+            contracted_vertices_count: total_v,
+            is_direct_cycle: None,
+            is_infeasible: false,
+        }
+    }
+
     pub fn contract(g: &Graph) -> (Graph, Degree2Contractor) {
         let total_v = g.adjacency_list.len();
         let mut adj: HashMap<i32, HashSet<i32>> = HashMap::new();

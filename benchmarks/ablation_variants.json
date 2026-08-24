@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "graph_dir": "FHCPCS-col",
+  "timeout_sec": 1800,
+  "expected_status": "SATISFIABLE",
+  "default_variants": [
+    "paper_upstream",
+    "current_base",
+    "plus_3opt",
+    "plus_short_cuts",
+    "plus_degree2",
+    "plus_cluster_cuts",
+    "plus_hub_patcher",
+    "plus_matching_patcher",
+    "plus_chained_lk",
+    "plus_ils_patcher",
+    "plus_macro_patcher",
+    "plus_dense_prepasses",
+    "fallback_mtz",
+    "adaptive_escalation",
+    "current_full"
+  ],
+  "variants": [
+    {
+      "name": "paper_upstream",
+      "source_dir": "../SAT-based-CEGAR/src/cegar-fix",
+      "binary": "../SAT-based-CEGAR/src/cegar-fix/target/release/cegar-fix",
+      "isolated_build": true,
+      "supports_output_tour": false,
+      "options": {
+        "-e": "1",
+        "-b": "3",
+        "-y": "0",
+        "-t": "3",
+        "-l": "1"
+      }
+    },
+    {
+      "name": "current_base",
+      "source_dir": "src/cegar-fix",
+      "binary": "src/cegar-fix/target/release/cegar-fix",
+      "supports_output_tour": true,
+      "supports_internal_timeout": true,
+      "options": {
+        "-e": "1",
+        "-b": "3",
+        "-y": "0",
+        "-t": "3",
+        "-l": "1",
+        "--three-opt": "0",
+        "--cegar-fallback": "0",
+        "--mtz-stall": "0",
+        "--adaptive-escalation": "0",
+        "--degree2-triangle-prune": "0",
+        "--degree2-contraction": "0",
+        "--global-short-cuts": "0",
+        "--short-cycle-sec": "0",
+        "--cluster-cuts": "0",
+        "--modular-prepass": "0",
+        "--hub-partition-prepass": "0",
+        "--hub-patcher": "0",
+        "--matching-patcher": "0",
+        "--chained-lk": "0",
+        "--ils-patcher": "0",
+        "--macro-patcher": "0",
+        "--telemetry": "1"
+      }
+    },
+    {
+      "name": "plus_3opt",
+      "extends": "current_base",
+      "options": {
+        "--three-opt": "1"
+      }
+    },
+    {
+      "name": "plus_short_cuts",
+      "extends": "current_base",
+      "options": {
+        "--global-short-cuts": "1",
+        "--short-cycle-sec": "1"
+      }
+    },
+    {
+      "name": "plus_degree2",
+      "extends": "current_base",
+      "options": {
+        "--degree2-triangle-prune": "1",
+        "--degree2-contraction": "1"
+      }
+    },
+    {
+      "name": "plus_cluster_cuts",
+      "extends": "current_base",
+      "options": {
+        "--cluster-cuts": "1"
+      }
+    },
+    {
+      "name": "plus_hub_patcher",
+      "extends": "current_base",
+      "options": {
+        "--hub-patcher": "1"
+      }
+    },
+    {
+      "name": "plus_matching_patcher",
+      "extends": "current_base",
+      "options": {
+        "--matching-patcher": "1"
+      }
+    },
+    {
+      "name": "plus_chained_lk",
+      "extends": "current_base",
+      "options": {
+        "--chained-lk": "1"
+      }
+    },
+    {
+      "name": "plus_ils_patcher",
+      "extends": "current_base",
+      "options": {
+        "--ils-patcher": "1"
+      }
+    },
+    {
+      "name": "plus_macro_patcher",
+      "extends": "current_base",
+      "options": {
+        "--macro-patcher": "1"
+      }
+    },
+    {
+      "name": "plus_dense_prepasses",
+      "extends": "current_base",
+      "options": {
+        "--modular-prepass": "1",
+        "--hub-partition-prepass": "1"
+      }
+    },
+    {
+      "name": "fallback_mtz",
+      "extends": "plus_3opt",
+      "options": {
+        "--cegar-fallback": "1",
+        "--mtz-stall": "6"
+      }
+    },
+    {
+      "name": "adaptive_escalation",
+      "extends": "plus_3opt",
+      "options": {
+        "--cegar-fallback": "1",
+        "--mtz-stall": "6",
+        "--adaptive-escalation": "1"
+      }
+    },
+    {
+      "name": "current_full",
+      "extends": "adaptive_escalation",
+      "options": {
+        "--degree2-triangle-prune": "1",
+        "--degree2-contraction": "1",
+        "--global-short-cuts": "1",
+        "--short-cycle-sec": "1",
+        "--cluster-cuts": "1",
+        "--modular-prepass": "1",
+        "--hub-partition-prepass": "1",
+        "--hub-patcher": "1",
+        "--matching-patcher": "1",
+        "--chained-lk": "1",
+        "--ils-patcher": "1",
+        "--macro-patcher": "1"
+      }
+    }
+  ]
+}

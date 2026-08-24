@@ -1,6 +1,7 @@
 use cegar_fix::graph::Graph;
 use cegar_fix::macro_splicer::verify_tour_on_raw_graph;
 use cegar_fix::two_tier_orchestrator::{solve_graph_two_tier, write_hcp_tour, TwoTierSolverOptions};
+use cegar_fix::solver_outcome::SolverOutcome;
 use std::fs;
 use std::path::Path;
 
@@ -62,10 +63,10 @@ fn test_synthetic_two_tier_orchestrator_solve() {
         output_path: Some(temp_out.to_string()),
     };
 
-    let result = solve_graph_two_tier(&g, &options);
-    assert!(result.is_some(), "Expected solve_graph_two_tier to find a tour");
-
-    let tour = result.unwrap();
+    let tour = match solve_graph_two_tier(&g, &options) {
+        SolverOutcome::Sat(tour) => tour,
+        other => panic!("expected SAT, got {:?}", other),
+    };
     assert_eq!(tour.len(), g.adjacency_list.len());
     assert!(verify_tour_on_raw_graph(&tour, &g), "Tour must be verified on raw graph");
     assert!(Path::new(temp_out).exists(), "Output HCP tour file must be written");
@@ -85,7 +86,7 @@ fn test_synthetic_two_tier_orchestrator_timeout() {
     };
 
     let result = solve_graph_two_tier(&g, &options);
-    assert!(result.is_none(), "Expected timeout / iteration limit to return None");
+    assert!(matches!(result, SolverOutcome::Unknown(_)), "Expected timeout / iteration limit to return UNKNOWN");
 }
 
 #[test]
@@ -102,7 +103,7 @@ fn test_write_hcp_tour_format() {
     let content = fs::read_to_string(temp_out).unwrap();
     let lines: Vec<&str> = content.lines().collect();
 
-    assert_eq!(lines[0], "NAME : graph950.hcp.tour");
+    assert_eq!(lines[0], "NAME : hcp-solution");
     assert_eq!(lines[1], "TYPE : TOUR");
     assert_eq!(lines[2], "DIMENSION : 4");
     assert_eq!(lines[3], "TOUR_SECTION");

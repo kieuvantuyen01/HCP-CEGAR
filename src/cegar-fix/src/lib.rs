@@ -23,3 +23,4 @@ pub mod two_tier_orchestrator;
 pub mod staged_subcycle_filter;
 pub mod dual_cut_generator;
 pub mod staged_lazy_smt_solver;
+pub mod solver_outcome;

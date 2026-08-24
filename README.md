@@ -37,6 +37,15 @@ cargo build --release
 ./src/cegar-fix/target/release/cegar-fix -i FHCPCS-col/graph1.col -e 1 -b 3 -y 3 -t 3 -l 1
 ```
 
+### Reproducible A/B Benchmark
+
+```bash
+./run_tests.sh
+python3 tools/hcp_benchmark.py --set regression_core --timeout 1800
+```
+
+The runner records an immutable manifest, JSONL results, raw logs, feature telemetry, and independently verifies every SAT tour. See [`docs/reproducible-benchmark.md`](docs/reproducible-benchmark.md).
+
 For full CLI options and algorithmic descriptions, please refer to [`docs/rust_solver_architecture_and_methods.md`](docs/rust_solver_architecture_and_methods.md).
 
 ---

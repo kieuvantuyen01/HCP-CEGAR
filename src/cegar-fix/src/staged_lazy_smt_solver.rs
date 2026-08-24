@@ -6,7 +6,8 @@ use crate::staged_subcycle_filter::StagedSubcycleFilter;
 use crate::dual_cut_generator::DualCutGenerator;
 use crate::macro_splicer::verify_tour_on_raw_graph;
 use crate::two_tier_orchestrator::write_hcp_tour;
-use rustsat::solvers::{Solve, SolverResult};
+use crate::solver_outcome::SolverOutcome;
+use rustsat::solvers::{ControlSignal, Solve, SolverResult, Terminate};
 use rustsat::types::TernaryVal;
 use rustsat_cadical::CaDiCaL;
 
@@ -29,7 +30,7 @@ impl Default for StagedLazySmtOptions {
 pub fn solve_staged_lazy_smt(
     g: &Graph,
     options: &StagedLazySmtOptions,
-) -> Option<Vec<i32>> {
+) -> SolverOutcome {
     let start_time = Instant::now();
     let n = g.adjacency_list.len();
 
@@ -52,6 +53,15 @@ pub fn solve_staged_lazy_smt(
     // 3. Initialize CaDiCaL
     let mut solver = CaDiCaL::default();
     let _ = solver.add_cnf(cnf);
+    let timeout_origin = start_time;
+    let timeout_secs = options.timeout_secs;
+    solver.attach_terminator(move || {
+        if timeout_origin.elapsed().as_secs_f64() >= timeout_secs {
+            ControlSignal::Terminate
+        } else {
+            ControlSignal::Continue
+        }
+    });
 
     let mut filter = StagedSubcycleFilter::new(options.max_batch_size);
     let mut iteration = 0;
@@ -65,7 +75,10 @@ pub fn solve_staged_lazy_smt(
             Ok(r) => r,
             Err(e) => {
                 eprintln!("CaDiCaL solver error at iter {}: {:?}", iteration, e);
-                return None;
+                return SolverOutcome::error(format!(
+                    "CaDiCaL error at iteration {}: {:?}",
+                    iteration, e
+                ));
             }
         };
 
@@ -78,7 +91,10 @@ pub fn solve_staged_lazy_smt(
                     Ok(s) => s,
                     Err(e) => {
                         eprintln!("Failed to get full solution at iter {}: {:?}", iteration, e);
-                        return None;
+                        return SolverOutcome::error(format!(
+                            "failed to read CaDiCaL model at iteration {}: {:?}",
+                            iteration, e
+                        ));
                     }
                 };
                 let mut active_arcs = Vec::new();
@@ -100,19 +116,17 @@ pub fn solve_staged_lazy_smt(
                     );
                     if verify_tour_on_raw_graph(tour, g) {
                         println!("CERTIFICATION PASSED: Verified tour independently on raw graph G!");
-                        let out_path = options
-                            .output_path
-                            .as_deref()
-                            .unwrap_or("scratch/graph950/found_tour_staged_smt.hcp");
-                        if let Err(e) = write_hcp_tour(tour, out_path) {
-                            eprintln!("Warning: failed to write tour to {}: {}", out_path, e);
-                        } else {
-                            println!("Wrote certified tour to {}", out_path);
+                        if let Some(out_path) = options.output_path.as_deref() {
+                            if let Err(e) = write_hcp_tour(tour, out_path) {
+                                eprintln!("Warning: failed to write tour to {}: {}", out_path, e);
+                            } else {
+                                println!("Wrote certified tour to {}", out_path);
+                            }
                         }
-                        return Some(tour.clone());
+                        return SolverOutcome::sat(tour.clone());
                     } else {
                         eprintln!("Verification failed on raw graph.");
-                        return None;
+                        return SolverOutcome::error("independent tour verification failed");
                     }
                 }
 
@@ -120,7 +134,10 @@ pub fn solve_staged_lazy_smt(
                 let active_cycles = filter.filter_active_cycles(&subcycles, n);
                 if active_cycles.is_empty() {
                     eprintln!("Warning: No active cycles to cut at iter {}", iteration);
-                    return None;
+                    return SolverOutcome::error(format!(
+                        "no active subcycle was available at iteration {}",
+                        iteration
+                    ));
                 }
 
                 let mut added_this_round = 0;
@@ -154,11 +171,16 @@ pub fn solve_staged_lazy_smt(
                     iteration,
                     start_time.elapsed().as_secs_f64()
                 );
-                return None;
+                return SolverOutcome::Unsat;
             }
             SolverResult::Interrupted => {
                 println!("Solver interrupted at iter {}.", iteration);
-                return None;
+                let reason = if start_time.elapsed().as_secs_f64() >= options.timeout_secs {
+                    format!("strict in-process timeout at iteration {}", iteration)
+                } else {
+                    format!("CaDiCaL interrupted at iteration {}", iteration)
+                };
+                return SolverOutcome::unknown(reason);
             }
         }
     }
@@ -167,5 +189,8 @@ pub fn solve_staged_lazy_smt(
         "[TIMEOUT] Reached {:.1}s timeout after {} iterations ({} total cuts added).",
         options.timeout_secs, iteration, total_cuts_added
     );
-    None
+    SolverOutcome::unknown(format!(
+        "cooperative timeout after {} iterations and {} cuts",
+        iteration, total_cuts_added
+    ))
 }
