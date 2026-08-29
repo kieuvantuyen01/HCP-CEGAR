@@ -10,8 +10,8 @@
   "variants": [
     {
       "name": "hcup_outside_mergecutset",
-      "source_dir": "../hcup",
-      "binary": "../hcup/cmake-build-release/hcup",
+      "source_dir": "external/hcup",
+      "binary": "external/hcup/cmake-build-release/hcup",
       "build_system": "cmake",
       "cmake_build_dir": "cmake-build-release",
       "cmake_target": "hcup",
@@ -52,6 +52,24 @@
         "vertices",
         "--cadical",
         "plain"
+      ]
+    },
+    {
+      "name": "cre_cegar_m420",
+      "source_dir": "external/SAT_HCP/ChineseRemainderConvert",
+      "binary": "external/SAT_HCP/ChineseRemainderConvert/encode.py",
+      "build_system": "none",
+      "interpreter": "python3",
+      "input_flag": null,
+      "supports_internal_timeout": true,
+      "external_timeout_grace_sec": 0,
+      "status_protocol": "dimacs",
+      "sat_solver": "CaDiCaL 1.9.5 through PySAT",
+      "arguments": [
+        "420",
+        "--cegar",
+        "--no-legacy-log",
+        "--no-json-log"
       ]
     },
     {

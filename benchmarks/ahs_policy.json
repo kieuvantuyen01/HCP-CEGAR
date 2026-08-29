@@ -1,6 +1,11 @@
 {
   "schema_version": 1,
   "default_policy": "rule_v1",
+  "controller": {
+    "type": "fixed_rules",
+    "uses_machine_learning": false,
+    "description": "Deterministic routing from graph density and degree-2 fraction; no trained model is loaded or required."
+  },
   "routing": {
     "dense_m_over_n_min": 3.0,
     "degree2_fraction_min_exclusive": 0.1
@@ -31,8 +36,8 @@
     },
     {
       "name": "hcup_hfp_preventsubcycle",
-      "source_dir": "../hcup",
-      "binary": "../hcup/cmake-build-release/hcup",
+      "source_dir": "external/hcup",
+      "binary": "external/hcup/cmake-build-release/hcup",
       "build_system": "cmake",
       "cmake_build_dir": "cmake-build-release",
       "cmake_target": "hcup",
@@ -52,8 +57,8 @@
     },
     {
       "name": "hcup_outside_mergecutset",
-      "source_dir": "../hcup",
-      "binary": "../hcup/cmake-build-release/hcup",
+      "source_dir": "external/hcup",
+      "binary": "external/hcup/cmake-build-release/hcup",
       "build_system": "cmake",
       "cmake_build_dir": "cmake-build-release",
       "cmake_target": "hcup",
@@ -144,11 +149,11 @@
     },
     {
       "name": "sat_repair",
-      "reason": "No implemented repair encoding and independent correctness test are available yet."
+      "reason": "cegar-fix contains an experimental parallel_sub_hcp repair path, but AHS keeps it disabled until single-core execution, hard subsolver timeouts, correctness tests, and a B2a/control ablation are available."
     },
     {
       "name": "cre_cegar",
-      "reason": "The available prototype is not yet established as a sound default AHS component."
+      "reason": "The external CRE prototype now has an experimental verify-cut-solve mode, but it remains disabled until broader exhaustive correctness tests and paired coverage ablations establish it as a sound, useful AHS component."
     }
   ]
 }

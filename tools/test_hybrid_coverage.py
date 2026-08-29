@@ -19,6 +19,13 @@ EXPECTED_OPEN = {
     975, 976, 981, 982, 983, 986, 987, 990, 993, 994, 998,
 }
 
+EXPECTED_CEGAR957_TIMEOUT = {
+    357, 479, 651, 668, 677, 678, 710, 717, 725, 734, 744,
+    746, 761, 788, 809, 810, 832, 868, 882, 910, 937, 940,
+    944, 950, 951, 954, 959, 960, 963, 965, 966, 971, 974,
+    975, 976, 981, 982, 983, 986, 987, 990, 993, 994, 998,
+}
+
 
 class HybridCoverageTests(unittest.TestCase):
     @classmethod
@@ -36,6 +43,24 @@ class HybridCoverageTests(unittest.TestCase):
         self.assertEqual(len(union), 968)
         self.assertEqual(set(range(1, 1002)) - union, EXPECTED_OPEN)
         self.assertEqual(len(portfolio), 4)
+
+    def test_cegar957_timeout_set_matches_per_instance_evidence(self) -> None:
+        rows, _ = coverage.build_instance_rows(self.data, self.indexed)
+        derived = {
+            int(row["graph_number"])
+            for row in rows
+            if row["status__ccad_2loop_asym3_2opt3"] == coverage.TIMEOUT
+        }
+        self.assertEqual(derived, EXPECTED_CEGAR957_TIMEOUT)
+
+        configured = set(
+            runner.load_instance_set(
+                runner.ROOT / "benchmarks/instance_sets.json",
+                "cegar957_timeout_44",
+            )
+        )
+        self.assertEqual(configured, EXPECTED_CEGAR957_TIMEOUT)
+        self.assertEqual(len(configured), 44)
 
     def test_documented_baseline_and_interrupted_console_are_not_conflated(self) -> None:
         self.assertEqual(len(self.data.baseline_timeout_class), 75)
@@ -104,6 +129,27 @@ class HybridCoverageTests(unittest.TestCase):
 
 
 class RunnerCompatibilityTests(unittest.TestCase):
+    def test_backend_json_summary_is_parsed_but_kept_separate(self) -> None:
+        stdout = (
+            'c result_json={"certificate_status":"VERIFIED","cegar_iterations":2}\n'
+            "s SATISFIABLE\n"
+        )
+        self.assertEqual(
+            runner.parse_backend_result(stdout),
+            {"certificate_status": "VERIFIED", "cegar_iterations": 2},
+        )
+        self.assertIsNone(runner.parse_backend_result("c result_json={broken}\n"))
+
+    def test_variant_command_supports_positional_python_backends(self) -> None:
+        variant = {"interpreter": "python3", "input_flag": None}
+        binary = Path("solver.py")
+        graph = Path("graph1.col")
+        self.assertEqual(
+            runner.variant_command_prefix(variant, binary)
+            + runner.variant_input_argv(variant, graph),
+            ["python3", "solver.py", "graph1.col"],
+        )
+
     def test_hcup_status_and_model_parsing(self) -> None:
         stdout = "configuration\nSAT\nMODEL: 1 3 2 4\n"
         self.assertEqual(runner.parse_status(stdout, "hcup"), "SATISFIABLE")

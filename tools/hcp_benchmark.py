@@ -29,6 +29,7 @@ METRIC_RE = re.compile(r"^c metric (?P<body>.*)$")
 INCREMENT_RE = re.compile(r"overall incremented number\s*=\s*(\d+)")
 CLAUSE_RE = re.compile(r"overall number of added block clauses\s*=\s*(\d+)")
 SOLVER_STATS_RE = re.compile(r"^c solver_stats (?P<body>.*)$")
+BACKEND_RESULT_PREFIX = "c result_json="
 
 
 def utc_now() -> str:
@@ -171,6 +172,20 @@ def option_argv(options: dict[str, Any]) -> list[str]:
         if value is not True:
             argv.append(str(value))
     return argv
+
+
+def variant_command_prefix(variant: dict[str, Any], binary: Path) -> list[str]:
+    """Return an optional interpreter followed by the configured program."""
+    interpreter = variant.get("interpreter")
+    return [str(interpreter), str(binary)] if interpreter else [str(binary)]
+
+
+def variant_input_argv(variant: dict[str, Any], graph_path: Path) -> list[str]:
+    """Support both `-i graph` and positional graph command-line protocols."""
+    input_flag = variant.get("input_flag", "-i")
+    if input_flag is None:
+        return [str(graph_path)]
+    return [str(input_flag), str(graph_path)]
 
 
 def graph_features(path: Path) -> tuple[dict[str, Any], set[int], set[tuple[int, int]]]:
@@ -370,6 +385,22 @@ def parse_solver_stats(stdout: str) -> dict[str, Any] | None:
             else:
                 values[key] = value
         last = values
+    return last
+
+
+def parse_backend_result(stdout: str) -> dict[str, Any] | None:
+    """Parse an optional backend-owned JSON summary without trusting its certificate."""
+    last: dict[str, Any] | None = None
+    for line in stdout.splitlines():
+        value = line.strip()
+        if not value.startswith(BACKEND_RESULT_PREFIX):
+            continue
+        try:
+            payload = json.loads(value[len(BACKEND_RESULT_PREFIX) :])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            last = payload
     return last
 
 
@@ -587,7 +618,7 @@ def main() -> int:
         binary = actual_binaries[variant["name"]]
         if not binary.is_file():
             raise FileNotFoundError(f"binary for {variant['name']} not found: {binary}")
-        if not os.access(binary, os.X_OK):
+        if not variant.get("interpreter") and not os.access(binary, os.X_OK):
             raise PermissionError(f"binary is not executable: {binary}")
         build_source = (ROOT / variant["source_dir"]).resolve()
         lockfile = build_source / "Cargo.lock"
@@ -705,11 +736,9 @@ def main() -> int:
             tour_path = candidate_tour
             raw_path = candidate_raw
             tour_path.parent.mkdir(parents=True, exist_ok=True)
-            input_flag = str(variant.get("input_flag", "-i"))
             command = [
-                str(binary),
-                input_flag,
-                str(graph_path),
+                *variant_command_prefix(variant, binary),
+                *variant_input_argv(variant, graph_path),
                 *option_argv(variant.get("options", {})),
                 *[str(value) for value in variant.get("arguments", [])],
             ]
@@ -797,6 +826,7 @@ def main() -> int:
                 "phase_stats": phase_stats,
                 "phase_seconds": phase_seconds,
                 "solver_stats": parse_solver_stats(stdout),
+                "backend_result": parse_backend_result(stdout),
                 "stdout_sha256": hashlib.sha256(stdout.encode()).hexdigest(),
                 "stderr_sha256": hashlib.sha256(stderr.encode()).hexdigest(),
                 "raw_log": str(raw_path),

@@ -1,0 +1,56 @@
+name: build-and-smoke-test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-build-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Unit tests
+        run: PYTHONPATH=tools python3 -m unittest discover -s tools -p 'test_*.py' -v
+
+      - name: Prepare pinned backends and build
+        run: ./setup_dependencies.sh
+
+      - name: CRE verified smoke test
+        run: |
+          ./run_cre_benchmark.sh \
+            --instances 1 \
+            --timeout 30 \
+            --output benchmark-runs/ci-cre-graph1
+
+      - name: Rule-based AHS verified smoke test
+        run: |
+          set +e
+          ./run_ahs.sh \
+            --input FHCPCS-col/graph1.col \
+            --policy rule_v1 \
+            --timeout 30 \
+            --no-build \
+            --run-dir ahs-runs/ci-graph1 \
+            --output-tour ahs-runs/ci-graph1.tour
+          status=$?
+          set -e
+          test "$status" -eq 10
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          summary = json.loads(Path("ahs-runs/ci-graph1/summary.json").read_text())
+          assert summary["status"] == "SATISFIABLE"
+          assert summary["verified"] is True
+          assert summary["controller_mode"]["type"] == "fixed_rules"
+          assert summary["controller_mode"]["uses_machine_learning"] is False
+          PY

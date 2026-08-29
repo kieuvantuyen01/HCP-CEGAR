@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """AHS v0: a verified, budgeted portfolio for Hamiltonian-cycle SAT solvers.
 
-This is deliberately a controller, not a new claim that the backends share SAT
-state.  It selects an explicit route from graph features, gives each backend a
-cumulative deadline, and accepts SAT only after independent tour verification.
+This is deliberately a fixed-rule controller, not a learned selector and not a
+new claim that the backends share SAT state. It selects an explicit route from
+graph features, gives each backend a cumulative deadline, and accepts SAT only
+after independent tour verification.
 """
 
 from __future__ import annotations
@@ -43,6 +44,14 @@ def load_config(path: Path) -> dict[str, Any]:
 def validate_config(config: dict[str, Any]) -> None:
     if config.get("schema_version") != 1:
         raise ValueError("AHS config schema_version must be 1")
+
+    controller = config.get("controller")
+    if not isinstance(controller, dict):
+        raise ValueError("AHS config must declare its controller")
+    if controller.get("type") != "fixed_rules":
+        raise ValueError("this AHS implementation supports only a fixed_rules controller")
+    if controller.get("uses_machine_learning") is not False:
+        raise ValueError("AHS v0 must explicitly disable machine learning")
 
     raw_backends = config.get("backends")
     if not isinstance(raw_backends, list) or not raw_backends:
@@ -185,7 +194,7 @@ def prepare_backends(
         if not binary.is_file():
             hint = "run without --no-build first" if no_build else "check the backend configuration"
             raise FileNotFoundError(f"backend {name} not found: {binary}; {hint}")
-        if not os.access(binary, os.X_OK):
+        if not backend.get("interpreter") and not os.access(binary, os.X_OK):
             raise PermissionError(f"backend {name} is not executable: {binary}")
         binaries[name] = binary
     return binaries
@@ -239,9 +248,8 @@ def run_stage(
 ) -> tuple[dict[str, Any], list[int] | None]:
     backend_tour = raw_path.with_suffix(".tour")
     command = [
-        str(binary),
-        str(backend.get("input_flag", "-i")),
-        str(graph_path),
+        *runner.variant_command_prefix(backend, binary),
+        *runner.variant_input_argv(backend, graph_path),
         *runner.option_argv(backend.get("options", {})),
         *[str(value) for value in backend.get("arguments", [])],
     ]
@@ -289,6 +297,19 @@ def run_stage(
             "tour_vertices": len(tour) if tour else None,
             "raw_log": str(raw_path),
         }
+        phase_stats, phase_seconds = runner.parse_metrics(stdout)
+        increment_matches = runner.INCREMENT_RE.findall(stdout)
+        clause_matches = runner.CLAUSE_RE.findall(stdout)
+        result.update(
+            {
+                "increments": int(increment_matches[-1]) if increment_matches else None,
+                "blocking_clauses": int(clause_matches[-1]) if clause_matches else None,
+                "phase_stats": phase_stats,
+                "phase_seconds": phase_seconds,
+                "solver_stats": runner.parse_solver_stats(stdout),
+                "backend_result": runner.parse_backend_result(stdout),
+            }
+        )
         return result, tour
     except OSError as error:
         wall_sec = 0.0
@@ -320,6 +341,14 @@ def run_stage(
 def exhausted_status(stage_results: list[dict[str, Any]]) -> str:
     hard_failures = {"ERROR", "INVALID_SAT", "UNTRUSTED_UNSAT"}
     return "ERROR" if any(result["status"] in hard_failures for result in stage_results) else "UNKNOWN"
+
+
+def transition_reason(stage_results: list[dict[str, Any]]) -> str:
+    """Explain a policy transition without consulting an instance-ID oracle."""
+    if not stage_results:
+        return "policy_route_start"
+    status = str(stage_results[-1].get("status", "UNKNOWN")).lower()
+    return f"previous_stage_{status}"
 
 
 def make_run_dir(graph_path: Path | None, requested: Path | None) -> Path:
@@ -383,7 +412,8 @@ def main() -> int:
         stages = config["policies"][policy_name]["routes"][family]
         cumulative = cumulative_stage_fractions(stages)
         print(
-            f"c ahs implementation=AHS-v0-driver policy={policy_name} route={family} "
+            f"c ahs implementation=AHS-v0-driver controller=fixed_rules "
+            f"machine_learning=false policy={policy_name} route={family} "
             f"budget_sec={args.budget:g}"
         )
         for index, stage in enumerate(stages, 1):
@@ -425,6 +455,7 @@ def main() -> int:
         "created_utc": runner.utc_now(),
         "implementation": "AHS-v0-driver",
         "controller": str(Path(__file__).resolve()),
+        "controller_mode": config["controller"],
         "controller_sha256": runner.sha256_file(Path(__file__).resolve()),
         "config": str(config_path),
         "config_sha256": runner.sha256_file(config_path),
@@ -462,7 +493,8 @@ def main() -> int:
     )
 
     print(
-        f"c ahs implementation=AHS-v0-driver policy={policy_name} route={family} "
+        f"c ahs implementation=AHS-v0-driver controller=fixed_rules "
+        f"machine_learning=false policy={policy_name} route={family} "
         f"budget_sec={args.budget:g}"
     )
     stage_results: list[dict[str, Any]] = []
@@ -471,6 +503,7 @@ def main() -> int:
     winning_backend: str | None = None
 
     for index, (stage, cumulative_fraction) in enumerate(zip(stages, cumulative), 1):
+        reason = transition_reason(stage_results)
         stage_deadline = budget_started + usable_budget * cumulative_fraction
         available = stage_deadline - time.perf_counter()
         if available <= 0:
@@ -483,6 +516,7 @@ def main() -> int:
                 "wall_sec": 0.0,
                 "verified": False,
                 "verification_reason": "cumulative_deadline_elapsed",
+                "transition_reason": reason,
             }
             stage_results.append(result)
             print(
@@ -494,7 +528,8 @@ def main() -> int:
         backend = indexed[stage["backend"]]
         print(
             f"c ahs_stage_start index={index} backend={backend['name']} "
-            f"timeout_sec={available:.6f} cumulative_fraction={cumulative_fraction:.6f}"
+            f"timeout_sec={available:.6f} cumulative_fraction={cumulative_fraction:.6f} "
+            f"reason={reason}"
         )
         result, tour = run_stage(
             backend,
@@ -510,6 +545,7 @@ def main() -> int:
         result["fraction"] = float(stage["fraction"])
         result["cumulative_fraction"] = cumulative_fraction
         result["deadline_from_budget_start_sec"] = usable_budget * cumulative_fraction
+        result["transition_reason"] = reason
         stage_results.append(result)
         print(
             f"c ahs_stage_end index={index} backend={backend['name']} "
@@ -548,6 +584,7 @@ def main() -> int:
         "budget_overrun_sec": max(0.0, total_wall_sec - args.budget),
         "policy": policy_name,
         "route": family,
+        "controller_mode": config["controller"],
         "stage_results": stage_results,
     }
     (run_dir / "summary.json").write_text(

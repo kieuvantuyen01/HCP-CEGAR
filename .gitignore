@@ -19,3 +19,7 @@ __pycache__/
 *.swp
 benchmark-runs/
 ahs-runs/
+
+# Reproducibly cloned external backends and the local Python environment
+external/
+.venv/

@@ -1,0 +1,2 @@
+# Optional dependency used only by the experimental CRE--CEGAR backend.
+python-sat>=1.8.dev20,<2

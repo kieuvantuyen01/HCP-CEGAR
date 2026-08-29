@@ -11,6 +11,8 @@ AHS v0 là một bộ điều phối có kiểm chứng cho các SAT solver HCP 
 
 Phiên bản này tích hợp ở mức tiến trình. CEGAR và HCup chưa truyền learned clauses hoặc cut-set trực tiếp cho nhau.
 
+Controller hiện tại **không dùng học máy**. Nó không có bước train, không nạp model và không cần thư viện ML. Route được chọn bằng hai luật cố định trên `m/n` và tỷ lệ đỉnh bậc 2; config và lý do chuyển stage đều được ghi vào artifact.
+
 ## 2. Thành phần đang bật
 
 Chính sách mặc định `rule_v1` dùng:
@@ -39,31 +41,29 @@ Nếu stage 1 kết thúc sớm ở giây 30 nhưng chưa giải được, stage
 
 Mặc định AHS giữ lại 2 giây để dừng tiến trình, kiểm tra tour và ghi artifact. Thời gian đọc đặc trưng và điều phối được tính trong ngân sách; chỉ thời gian biên dịch backend nằm ngoài ngân sách giải.
 
-## 4. Cài đặt và build
+## 4. Cài đặt và build chạy được sau khi clone
 
-Cấu trúc thư mục mặc định là:
-
-```text
-parent/
-├── HCP/     # repository này
-└── hcup/    # mã nguồn HCup
-```
-
-Cần có Python 3, Rust/Cargo và CMake cùng một C++ compiler. Từ thư mục `HCP/` chạy:
-
-Nếu chưa có HCup ở thư mục kề bên, clone bản đã sửa build portability:
+Cần cài Git, Python 3, Rust/Cargo, CMake và một C/C++ compiler. Từ thư mục `HCP/`, chạy:
 
 ```bash
-git clone https://github.com/kieuvantuyen01/Hcup.git ../hcup
+./setup_dependencies.sh
+./setup_dependencies.sh --check
 ```
 
-Sau đó build các backend:
+Script clone đúng commit public đã khóa vào `external/hcup` và `external/SAT_HCP`, tạo `.venv`, cài PySAT rồi build CEGAR/HCup. `external/` và `.venv/` không được commit. Script dừng nếu gặp checkout ngoài bị sửa, nên không ghi đè công việc local.
+
+Nếu máy chỉ cần chạy CRE hoặc chưa cài Rust/Cargo:
 
 ```bash
-./run_ahs.sh --build-only
+./setup_dependencies.sh --no-build
 ```
 
-Nếu các binary đã được build trên máy đó, thêm `--no-build` vào lệnh giải để AHS không kiểm tra build lại.
+Hai nguồn public được dùng là:
+
+- `https://github.com/kieuvantuyen01/Hcup`;
+- `https://github.com/kieuvantuyen01/SAT_HCP`, nhánh nguồn CRE đã kiểm chứng.
+
+Sau khi setup đầy đủ, thêm `--no-build` vào lệnh giải để không build lại.
 
 ## 5. Chạy một instance
 
@@ -123,7 +123,7 @@ Mỗi lần giải trực tiếp tạo một thư mục trong `ahs-runs/` gồm:
 
 - `manifest.json`: graph hash, config hash, binary hash, policy, route và môi trường;
 - `raw/`: stdout/stderr nguyên gốc của từng backend;
-- `summary.json`: kết quả từng stage và kết quả cuối;
+- `summary.json`: kết quả từng stage, lý do chuyển stage, telemetry backend và kết quả cuối;
 - `solution.tour`: chỉ có khi một tour đã vượt qua bộ kiểm tra độc lập.
 
 Benchmark nhiều instance tiếp tục ghi `manifest.json`, `results.jsonl`, raw log và tour trong `benchmark-runs/`. Artifact nội bộ của mỗi lần AHS nằm trong `artifacts/<variant>/graphN-rR/` của chính benchmark run, nên có thể chép cả thư mục kết quả sang máy khác mà không mất provenance. Nếu tiếp tục một task từng bị ngắt trước khi ghi JSONL, runner giữ artifact cũ và tạo hậu tố `-attempt2`, `-attempt3`, v.v.; nó không dùng nhầm tour còn sót lại.
@@ -147,7 +147,38 @@ python3 tools/test_hybrid_coverage.py
 Ba thành phần sau bị tắt có chủ ý và được ghi trong manifest:
 
 - truyền cut/learned clause giữa CEGAR và HCup;
-- SAT-repair;
-- CRE-CEGAR làm preprocessing mặc định.
+- SAT-repair trong policy AHS;
+- CRE-CEGAR trong policy AHS mặc định.
 
-Lý do là CLI hiện tại chưa cung cấp giao diện trao đổi cut chung, còn SAT-repair và CRE-CEGAR chưa có cài đặt kèm kiểm thử tính đúng đủ mạnh. Không nên gộp chúng vào số liệu AHS trước khi hoàn thành hai điều kiện đó.
+`cegar-fix` đã có prototype `parallel_sub_hcp`, nhưng chưa bảo đảm một core, hard timeout cho từng subsolver và chưa có ablation B2a/control. CRE đã có chế độ `--cegar` thử nghiệm và một benchmark variant riêng, nhưng chưa qua exhaustive test đủ rộng hoặc chứng minh marginal gain. Vì vậy hai prototype vẫn bị loại khỏi policy AHS mặc định; chúng phải được báo cáo thành ablation riêng.
+
+## 9. Các thí nghiệm khoanh vùng mới
+
+Chạy HFP trên đúng 44 timeout của cấu hình CEGAR-957:
+
+```bash
+python3 tools/hcp_benchmark.py \
+  --config benchmarks/hybrid_variants.json \
+  --set cegar957_timeout_44 \
+  --variants hcup_hfp_preventsubcycle \
+  --output benchmark-runs/hfp-cegar957-timeout44
+```
+
+Để đo overlap đầy đủ trên core-33, chạy cả hai HCup variant và không dùng `--stop-on-solved`:
+
+```bash
+python3 tools/hcp_benchmark.py \
+  --config benchmarks/hybrid_variants.json \
+  --set historical_open_33 \
+  --variants hcup_outside_mergecutset,hcup_hfp_preventsubcycle \
+  --output benchmark-runs/hcup-open33-overlap
+```
+
+CRE--CEGAR được giữ ngoài mặc định nhưng có thể chạy qua cùng external timeout và verifier. Wrapper kiểm tra `.venv` và source đã khóa trước khi chạy:
+
+```bash
+./run_cre_benchmark.sh \
+  --set historical_open_33 \
+  --timeout 1800 \
+  --output benchmark-runs/cre-cegar-m420-open33
+```

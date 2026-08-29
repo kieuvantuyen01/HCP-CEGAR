@@ -28,6 +28,21 @@
 
 ## 3. Build & Execution
 
+### One-command setup
+
+Install Git, Python 3, Rust/Cargo, CMake, and a C/C++ compiler, then run from
+the repository root:
+
+```bash
+./setup_dependencies.sh
+./setup_dependencies.sh --check
+```
+
+The setup script clones pinned public revisions of HCup and CRE into the ignored
+`external/` directory, creates `.venv`, installs PySAT, and builds the native
+backends. It never overwrites a dirty external checkout. To prepare only the
+Python/CRE part on a machine without Rust, use `./setup_dependencies.sh --no-build`.
+
 ### Build Release Binary
 ```bash
 cd src/cegar-fix
@@ -50,7 +65,7 @@ The runner records an immutable manifest, JSONL results, raw logs, feature telem
 
 ### Adaptive Hybrid SAT-HCP (AHS v0)
 
-AHS v0 runs the strongest replayed CEGAR configuration and HCup-HFP under one total budget. It routes only from reproducible graph features and accepts SAT only after independent tour verification.
+AHS v0 runs the strongest replayed CEGAR configuration and HCup-HFP under one total budget. It routes only from reproducible graph features and accepts SAT only after independent tour verification. The current controller is deterministic and rule-based: it does not train, load, or require a machine-learning model.
 
 ```bash
 ./run_ahs.sh --build-only
@@ -59,6 +74,17 @@ AHS v0 runs the strongest replayed CEGAR configuration and HCup-HFP under one to
 ```
 
 Implementation details, artifacts, policy fractions, and current limitations are documented in [`docs/ahs-implementation.md`](docs/ahs-implementation.md).
+
+Experimental CRE--CEGAR is available as an ablation backend, not as part of the default AHS policy. After setup, run it through the checked wrapper:
+
+```bash
+./run_cre_benchmark.sh \
+  --set historical_open_33 \
+  --timeout 1800 \
+  --output benchmark-runs/cre-cegar-m420-open33
+```
+
+The benchmark runner enforces an external timeout and accepts a CRE result only after the same independent tour verifier used for the other backends.
 
 For full CLI options and algorithmic descriptions, please refer to [`docs/rust_solver_architecture_and_methods.md`](docs/rust_solver_architecture_and_methods.md).
 

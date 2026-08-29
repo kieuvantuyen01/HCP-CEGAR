@@ -24,6 +24,8 @@ class AhsPolicyTests(unittest.TestCase):
 
     def test_default_config_is_valid_and_deterministic(self) -> None:
         self.assertEqual(self.config["default_policy"], "rule_v1")
+        self.assertEqual(self.config["controller"]["type"], "fixed_rules")
+        self.assertIs(self.config["controller"]["uses_machine_learning"], False)
         self.assertEqual(
             ahs.policy_backend_names(self.config, "rule_v1"),
             ["paper_ccad_best_replay", "hcup_hfp_preventsubcycle"],
@@ -61,6 +63,22 @@ class AhsPolicyTests(unittest.TestCase):
     def test_cumulative_deadlines_allow_unused_time_to_carry_forward(self) -> None:
         stages = self.config["policies"]["rule_v1"]["routes"]["sparse_other"]
         self.assertEqual(ahs.cumulative_stage_fractions(stages), [0.8, 1.0])
+
+    def test_transition_reason_uses_only_observed_stage_status(self) -> None:
+        self.assertEqual(ahs.transition_reason([]), "policy_route_start")
+        self.assertEqual(
+            ahs.transition_reason([{"status": "TIMEOUT", "graph_number": 950}]),
+            "previous_stage_timeout",
+        )
+
+    def test_machine_learning_controller_is_rejected(self) -> None:
+        config = copy.deepcopy(self.config)
+        config["controller"] = {
+            "type": "learned_selector",
+            "uses_machine_learning": True,
+        }
+        with self.assertRaisesRegex(ValueError, "fixed_rules"):
+            ahs.validate_config(config)
 
     def test_cegar_ffi_build_has_no_machine_specific_link_paths(self) -> None:
         build_script = (ahs.ROOT / "src/cegar-ffi/build.rs").read_text(encoding="utf-8")
@@ -160,6 +178,44 @@ class AhsVerificationTests(unittest.TestCase):
             self.assertTrue(result["timed_out"])
             self.assertLess(elapsed, 2.0)
 
+    def test_run_stage_preserves_backend_telemetry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            backend_binary = temp / "telemetry_backend.py"
+            backend_binary.write_text(
+                "#!/usr/bin/env python3\n"
+                "print('c metric phase=repair iteration=3 seconds=0.25 cycles_before=4 cycles_after=2')\n"
+                "print('c solver_stats iteration=3 conflicts=7 decisions=9 propagations=11 clauses=13 variables=17 avg_clause_len=2.5 cpu_solve_seconds=0.2')\n"
+                "print('overall incremented number = 3')\n"
+                "print('overall number of added block clauses = 5')\n"
+                "print('solution:')\n"
+                "print('1 2 3 4')\n"
+                "print('s SATISFIABLE')\n",
+                encoding="utf-8",
+            )
+            os.chmod(backend_binary, 0o755)
+            result, _ = ahs.run_stage(
+                {
+                    "name": "telemetry",
+                    "source_dir": str(temp),
+                    "binary": str(backend_binary),
+                    "build_system": "none",
+                    "trust_unsat": True,
+                },
+                backend_binary,
+                temp / "unused.col",
+                2.0,
+                {1, 2, 3, 4},
+                {(1, 2), (2, 3), (3, 4), (1, 4)},
+                temp / "raw.txt",
+                os.environ.copy(),
+            )
+            self.assertEqual(result["increments"], 3)
+            self.assertEqual(result["blocking_clauses"], 5)
+            self.assertEqual(result["phase_stats"]["repair"]["calls"], 1)
+            self.assertEqual(result["phase_stats"]["repair"]["cycle_reduction_total"], 2)
+            self.assertEqual(result["solver_stats"]["conflicts"], 7)
+
     def test_end_to_end_accepts_only_a_verified_fake_backend_tour(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
@@ -186,6 +242,10 @@ class AhsVerificationTests(unittest.TestCase):
                     {
                         "schema_version": 1,
                         "default_policy": "test",
+                        "controller": {
+                            "type": "fixed_rules",
+                            "uses_machine_learning": False,
+                        },
                         "routing": {
                             "dense_m_over_n_min": 3.0,
                             "degree2_fraction_min_exclusive": 0.1,

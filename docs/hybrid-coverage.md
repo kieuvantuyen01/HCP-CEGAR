@@ -43,19 +43,14 @@ Status values are `SOLVED`, `TIMEOUT`, `INCOMPLETE`, `ERROR`, and `MISSING`. `SO
 
 ## Run the next hybrid stage
 
-Place the HCup repository next to this repository, including its CaDiCaL submodule:
-
-```text
-parent/
-├── HCP/
-└── hcup/
-```
-
-The public fork includes the Clang/Apple-Silicon portability fixes used by the smoke test:
+Prepare the pinned HCup and CRE sources, Python environment, and native binaries:
 
 ```bash
-git clone --recurse-submodules https://github.com/kieuvantuyen01/Hcup.git hcup
+./setup_dependencies.sh
+./setup_dependencies.sh --check
 ```
+
+The script uses public forks with the portability and verified CRE--CEGAR changes, then places their pinned revisions under the ignored `external/` directory. No manually arranged sibling repository is required.
 
 The hybrid config contains the two most promising new complementary configurations as defaults. It builds HCup with CMake, runs configurations in order, verifies `MODEL:` output, and stops later stages for an instance after the first verified solution:
 
