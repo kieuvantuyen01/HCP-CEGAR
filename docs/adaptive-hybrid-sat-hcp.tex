@@ -1,0 +1,921 @@
+% !TeX program = xelatex
+% Tài liệu nhập môn và thiết kế phương pháp Adaptive Hybrid SAT-HCP.
+\documentclass[11pt,a4paper,oneside]{scrreprt}
+
+\usepackage{fontspec}
+\setmainfont{texgyretermes-regular.otf}[
+  BoldFont=texgyretermes-bold.otf,
+  ItalicFont=texgyretermes-italic.otf,
+  BoldItalicFont=texgyretermes-bolditalic.otf
+]
+\setsansfont{texgyreheros-regular.otf}[BoldFont=texgyreheros-bold.otf]
+\setmonofont{texgyrecursor-regular.otf}[BoldFont=texgyrecursor-bold.otf,Scale=0.92]
+\usepackage{polyglossia}
+\setdefaultlanguage{vietnamese}
+
+\usepackage[a4paper,top=23mm,bottom=25mm,left=27mm,right=23mm,headheight=15pt]{geometry}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,tabularx,array,multirow,longtable}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,calc,shapes.geometric,backgrounds}
+\usepackage[most]{tcolorbox}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{bookmark}
+
+\definecolor{navy}{HTML}{17324D}
+\definecolor{blue}{HTML}{246B9E}
+\definecolor{cyan}{HTML}{29A3A3}
+\definecolor{green}{HTML}{2C7A5A}
+\definecolor{orange}{HTML}{D97727}
+\definecolor{red}{HTML}{B5443C}
+\definecolor{ink}{HTML}{26323C}
+\definecolor{muted}{HTML}{647481}
+\definecolor{paper}{HTML}{F6F8FA}
+\definecolor{lightblue}{HTML}{EAF3F8}
+\definecolor{lightgreen}{HTML}{EAF5EF}
+\definecolor{lightorange}{HTML}{FFF3E8}
+\definecolor{lightred}{HTML}{FBEDEC}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=navy,
+  citecolor=green,
+  urlcolor=blue,
+  pdftitle={Adaptive Hybrid SAT-HCP: Từ nhập môn SAT đến thiết kế phương pháp tích hợp},
+  pdfauthor={Dự án HCP-CEGAR}
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setlist[itemize]{leftmargin=1.6em,itemsep=0.25em,topsep=0.25em}
+\setlist[enumerate]{leftmargin=1.8em,itemsep=0.3em,topsep=0.25em}
+\renewcommand{\arraystretch}{1.18}
+\captionsetup{font=small,labelfont={bf,color=navy}}
+
+\setkomafont{chapter}{\sffamily\bfseries\color{navy}}
+\setkomafont{section}{\sffamily\bfseries\color{navy}}
+\setkomafont{subsection}{\sffamily\bfseries\color{blue}}
+\renewcommand*{\chapterformat}{\color{cyan}\thechapter\autodot\enskip}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\sffamily\small Adaptive Hybrid SAT-HCP}
+\fancyhead[R]{\sffamily\small Tài liệu nhập môn và thiết kế}
+\fancyfoot[L]{\sffamily\scriptsize Dự án HCP-CEGAR}
+\fancyfoot[R]{\sffamily\scriptsize Trang \thepage/\pageref*{LastPage}}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\newtcolorbox{intuitionbox}[1][Trực giác]{
+  breakable,enhanced,colback=lightblue,colframe=blue,boxrule=0.7pt,
+  arc=2mm,left=2.5mm,right=2.5mm,top=2mm,bottom=2mm,
+  title={\sffamily\bfseries #1},fonttitle=\color{navy}
+}
+\newtcolorbox{examplebox}[1][Ví dụ]{
+  breakable,enhanced,colback=lightgreen,colframe=green,boxrule=0.7pt,
+  arc=2mm,left=2.5mm,right=2.5mm,top=2mm,bottom=2mm,
+  title={\sffamily\bfseries #1},fonttitle=\color{green}
+}
+\newtcolorbox{warningbox}[1][Điểm cần cẩn thận]{
+  breakable,enhanced,colback=lightorange,colframe=orange,boxrule=0.7pt,
+  arc=2mm,left=2.5mm,right=2.5mm,top=2mm,bottom=2mm,
+  title={\sffamily\bfseries #1},fonttitle=\color{orange}
+}
+\newtcolorbox{resultbox}[1][Kết luận chính]{
+  breakable,enhanced,colback=paper,colframe=navy,boxrule=1pt,
+  arc=2mm,left=3mm,right=3mm,top=2.5mm,bottom=2.5mm,
+  title={\sffamily\bfseries #1},fonttitle=\color{navy}
+}
+
+\newcommand{\sat}{\textsc{sat}}
+\newcommand{\hcp}{\textsc{hcp}}
+\newcommand{\cegar}{\textsc{cegar}}
+\newcommand{\hcup}{\textsc{HCup}}
+\newcommand{\vbs}{\textsc{vbs}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\yes}{\textcolor{green}{\ensuremath{\checkmark}}}
+\newcommand{\no}{\textcolor{red}{\ensuremath{\times}}}
+
+\begin{document}
+\hypersetup{pageanchor=false}
+
+\begin{titlepage}
+  \begin{tikzpicture}[remember picture,overlay]
+    \fill[navy] (current page.north west) rectangle ([yshift=-72mm]current page.north east);
+    \fill[cyan] ([yshift=-72mm]current page.north west) rectangle ([yshift=-75mm]current page.north east);
+    \draw[cyan!60,line width=1.2pt,opacity=0.8]
+      ([xshift=-20mm,yshift=-20mm]current page.north east) circle (24mm);
+    \draw[blue!60,line width=1.2pt,opacity=0.7]
+      ([xshift=-8mm,yshift=-54mm]current page.north east) circle (17mm);
+  \end{tikzpicture}
+
+  \vspace*{13mm}
+  {\sffamily\bfseries\fontsize{30}{35}\selectfont\color{white}
+  Adaptive Hybrid SAT-HCP\par}
+  \vspace{4mm}
+  {\sffamily\fontsize{17}{22}\selectfont\color{white}
+  Từ nhập môn SAT đến thiết kế một phương pháp tích hợp\par}
+
+  \vspace{38mm}
+  \begin{tcolorbox}[colback=paper,colframe=paper,arc=3mm,boxrule=0pt,left=6mm,right=6mm,top=5mm,bottom=5mm]
+    \sffamily\large
+    Tài liệu này giải thích bài toán chu trình Hamilton, SAT, CEGAR, cut-set và user propagator bằng trực giác trước, công thức sau. Phần cuối trình bày một phương pháp duy nhất có khả năng học và tận dụng các kỹ thuật tốt nhất từ những baseline hiện có.
+  \end{tcolorbox}
+
+  \vfill
+  {\sffamily\large\bfseries Dự án HCP-CEGAR}\par
+  {\sffamily\color{muted}Phiên bản thiết kế, tháng 8 năm 2026}\par
+\end{titlepage}
+
+\hypersetup{pageanchor=true}
+\pagenumbering{roman}
+
+\chapter*{Cách đọc tài liệu}
+\addcontentsline{toc}{chapter}{Cách đọc tài liệu}
+
+Tài liệu được viết cho cả người chưa từng học SAT. Người đọc không cần biết logic mệnh đề, solver hay CEGAR trước đó.
+
+\begin{itemize}
+  \item Nếu mới bắt đầu, hãy đọc tuần tự từ Chương 1 đến Chương 4.
+  \item Nếu đã biết SAT, có thể bắt đầu từ Chương 4 về CEGAR và cut-set.
+  \item Nếu quan tâm trực tiếp đến phương pháp mới, đọc Chương 6 đến Chương 10.
+  \item Các hộp màu xanh giải thích trực giác; hộp cam nêu rủi ro; hộp viền đậm chốt kết luận.
+\end{itemize}
+
+\begin{warningbox}[Trạng thái khoa học của đề xuất]
+Các con số trong Chương 5 đến từ dữ liệu đã có. Kiến trúc Adaptive Hybrid SAT-HCP trong các chương sau là một \emph{đề xuất nghiên cứu}: các module thành phần đã tồn tại hoặc đã có bằng chứng riêng, nhưng lợi ích của toàn bộ hệ tích hợp vẫn phải được kiểm nghiệm bằng một benchmark công bằng.
+\end{warningbox}
+
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+\chapter{Bài toán chu trình Hamilton là gì?}
+
+\section{Đồ thị: thành phố và con đường}
+
+Một \emph{đồ thị} gồm các đỉnh và các cạnh. Có thể hình dung đỉnh là thành phố, cạnh là con đường nối hai thành phố. Trong tài liệu này, ta xét đồ thị vô hướng: nếu đi được từ $u$ đến $v$ thì cũng đi được từ $v$ đến $u$.
+
+Một \emph{chu trình Hamilton} là một chuyến đi:
+
+\begin{enumerate}
+  \item đi qua mọi đỉnh đúng một lần;
+  \item sau cùng quay về đỉnh xuất phát;
+  \item chỉ sử dụng những cạnh có trong đồ thị.
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.47\textwidth}
+\centering
+\begin{tikzpicture}[every node/.style={circle,draw=navy,fill=white,minimum size=7mm,font=\sffamily\small}]
+  \node (a) at (90:1.05) {1};
+  \node (b) at (210:1.05) {2};
+  \node (c) at (330:1.05) {3};
+  \node (d) at ($(a)+(2.7,0)$) {4};
+  \node (e) at ($(b)+(2.7,0)$) {5};
+  \node (f) at ($(c)+(2.7,0)$) {6};
+  \draw[very thick,orange] (a)--(b)--(c)--(a);
+  \draw[very thick,orange] (d)--(e)--(f)--(d);
+  \draw[muted,dashed] (a)--(d) (b)--(e) (c)--(f);
+\end{tikzpicture}
+\caption{Mỗi đỉnh có bậc 2 trong lời giải, nhưng có hai chu trình rời nhau.}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.47\textwidth}
+\centering
+\begin{tikzpicture}[every node/.style={circle,draw=navy,fill=white,minimum size=7mm,font=\sffamily\small}]
+  \node (a) at (90:1.35) {1};
+  \node (b) at (150:1.35) {2};
+  \node (c) at (210:1.35) {3};
+  \node (d) at (270:1.35) {4};
+  \node (e) at (330:1.35) {5};
+  \node (f) at (30:1.35) {6};
+  \draw[very thick,green] (a)--(b)--(c)--(d)--(e)--(f)--(a);
+  \draw[muted,dashed] (a)--(d) (b)--(e) (c)--(f);
+\end{tikzpicture}
+\caption{Một chu trình duy nhất đi qua cả sáu đỉnh: đây là chu trình Hamilton.}
+\end{subfigure}
+\caption{Khác biệt giữa một cycle cover và một chu trình Hamilton.}
+\label{fig:cycle-cover}
+\end{figure}
+
+\begin{intuitionbox}
+Điều khó không phải chỉ là chọn hai cạnh tại mỗi đỉnh. Điều khó là buộc tất cả các cạnh được chọn phải nối thành \emph{một} vòng duy nhất. Nhiều vòng nhỏ như hình bên trái là một lời giải gần đúng nhưng chưa hợp lệ.
+\end{intuitionbox}
+
+\section{Tại sao bài toán khó?}
+
+Với một đồ thị nhỏ, ta có thể thử từng đường đi. Khi số đỉnh tăng, số khả năng tăng quá nhanh. hcp{} là bài toán NP-complete: chưa có thuật toán tổng quát nào được biết có thể giải nhanh mọi trường hợp.
+
+Điều này không có nghĩa mọi instance đều khó. Nhiều đồ thị lớn được giải trong tích tắc, trong khi một số đồ thị nhỏ hơn có cấu trúc đối xứng hoặc nhiều lựa chọn gần giống nhau lại làm solver mất hàng chục phút.
+
+\chapter{SAT cho người mới bắt đầu}
+
+\section{SAT là bài toán những công tắc đúng hoặc sai}
+
+Trong SAT, mỗi biến chỉ có hai giá trị:
+
+\[
+  x = \text{Đúng} \qquad\text{hoặc}\qquad x = \text{Sai}.
+\]
+
+Với HCP, ta tạo một biến $x_{uv}$ cho mỗi cạnh $(u,v)$:
+
+\[
+  x_{uv}=\text{Đúng} \Longleftrightarrow \text{cạnh $(u,v)$ được chọn vào chu trình}.
+\]
+
+SAT solver có nhiệm vụ bật hoặc tắt hàng nghìn, thậm chí hàng triệu công tắc sao cho mọi quy tắc đều được thỏa mãn.
+
+\section{Literal, clause và công thức CNF}
+
+Một \emph{literal} là một biến hoặc phủ định của biến:
+
+\[
+  x \quad\text{hoặc}\quad \neg x.
+\]
+
+Một \emph{clause} là phép ``hoặc''. Clause
+
+\[
+  (x_{12} \lor x_{13})
+\]
+
+nói rằng phải chọn ít nhất một trong hai cạnh $(1,2)$ và $(1,3)$.
+
+Một công thức CNF là phép ``và'' của nhiều clause:
+
+\[
+  (x_{12} \lor x_{13})
+  \land (\neg x_{12} \lor x_{14})
+  \land (\neg x_{13} \lor \neg x_{14}).
+\]
+
+\begin{examplebox}[Ví dụ ba công tắc]
+Giả sử $x_{12}$ được bật. Clause thứ hai buộc $x_{14}$ cũng bật. Khi đó clause thứ ba buộc $x_{13}$ tắt. SAT solver thực hiện hàng loạt suy luận kiểu này, nhưng ở quy mô rất lớn và có cơ chế quay lui khi đi vào ngõ cụt.
+\end{examplebox}
+
+\section{SAT solver làm việc như thế nào?}
+
+Một solver hiện đại như CaDiCaL có thể được hình dung bằng bốn thao tác:
+
+\begin{enumerate}
+  \item \textbf{Quyết định:} thử gán một biến là đúng hoặc sai.
+  \item \textbf{Lan truyền:} từ các clause hiện có, suy ra những biến bắt buộc.
+  \item \textbf{Phát hiện xung đột:} nhận ra rằng một nhánh lựa chọn không thể thỏa mãn.
+  \item \textbf{Học clause và quay lui:} ghi nhớ nguyên nhân xung đột để không lặp lại sai lầm tương tự.
+\end{enumerate}
+
+\begin{intuitionbox}[SAT solver không chỉ ``thử hết'']
+Điểm mạnh của SAT solver là học từ thất bại. Mỗi xung đột có thể tạo ra một quy tắc mới, loại bỏ cả một vùng lớn của không gian tìm kiếm thay vì chỉ loại một nghiệm.
+\end{intuitionbox}
+
+\section{SAT, UNSAT và UNKNOWN}
+
+\begin{tabularx}{\textwidth}{>{\bfseries\sffamily}l X}
+\toprule
+Kết quả & Ý nghĩa \\
+\midrule
+SAT & Tìm được một phép gán thỏa mọi clause. Với HCP, vẫn cần kiểm tra tour đầu ra. \\
+UNSAT & Chứng minh không có phép gán nào thỏa công thức. \\
+UNKNOWN/TIMEOUT & Chưa giải xong trong giới hạn tài nguyên; không được hiểu là UNSAT. \\
+\bottomrule
+\end{tabularx}
+
+\chapter{Biến HCP thành SAT}
+
+\section{Ràng buộc bậc: mỗi đỉnh chọn đúng hai cạnh}
+
+Trong một chu trình Hamilton vô hướng, mỗi đỉnh có đúng hai cạnh được chọn: một cạnh để đi vào và một cạnh để đi ra. Với đỉnh $v$, ta cần:
+
+\[
+  \sum_{e\in\delta(v)} x_e = 2,
+\]
+
+trong đó $\delta(v)$ là tập cạnh kề với $v$.
+
+Máy SAT không hiểu trực tiếp phép cộng này, nên ta phải dịch nó thành các clause. Có nhiều cách dịch:
+
+\begin{itemize}
+  \item \textbf{Pairwise/Binomial:} dễ hiểu, tốt khi số cạnh kề ít, nhưng sinh nhiều clause khi bậc lớn.
+  \item \textbf{Sinz sequential counter:} thêm các biến phụ theo kiểu bộ đếm tuần tự; thường gọn và lan truyền tốt.
+  \item \textbf{Commander:} chia biến thành nhóm rồi dùng biến chỉ huy; hữu ích cho tập biến lớn.
+  \item \textbf{Adder/CRT:} mô phỏng phép cộng hoặc thứ tự bằng mạch logic; có ưu điểm ở một số cấu trúc nhưng không phải lúc nào cũng tốt nhất.
+\end{itemize}
+
+\section{Vấn đề cycle cover}
+
+Chỉ ràng buộc ``mỗi đỉnh đúng hai cạnh'' chưa đủ. SAT solver có thể trả về nhiều chu trình nhỏ rời nhau như Hình~\ref{fig:cycle-cover}. Kết quả đó gọi là một \emph{cycle cover}.
+
+Ta cần thêm ràng buộc kết nối toàn cục: không được tồn tại một tập đỉnh $S$ bị cô lập khỏi phần còn lại của chu trình.
+
+\section{Tại sao không thêm mọi ràng buộc ngay từ đầu?}
+
+Với mỗi tập con $S\subset V$, về lý thuyết ta có thể viết một ràng buộc ngăn $S$ trở thành chu trình riêng. Nhưng số tập con là cấp số mũ. Việc sinh toàn bộ trước khi giải có thể tạo công thức quá lớn.
+
+\begin{resultbox}
+Ý tưởng cốt lõi của CEGAR là: ban đầu chỉ đưa vào SAT phần dễ và nhỏ; khi solver cho một lời giải sai, ta mới bổ sung đúng ràng buộc cần thiết để loại kiểu sai đó.
+\end{resultbox}
+
+\chapter{CEGAR và cut-set bằng trực giác}
+
+\section{CEGAR là vòng lặp ``đoán, kiểm tra, sửa''}
+
+CEGAR là viết tắt của \emph{Counterexample-Guided Abstraction Refinement}. Với HCP, quy trình có thể hiểu như sau:
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  node distance=9mm and 13mm,
+  box/.style={rounded corners,draw=navy,fill=paper,minimum width=39mm,minimum height=11mm,align=center,font=\sffamily\small},
+  decision/.style={diamond,aspect=2,draw=orange,fill=lightorange,align=center,font=\sffamily\small},
+  arrow/.style={-Latex,thick,draw=muted}
+]
+  \node[box] (encode) {Mã hóa ràng buộc bậc};
+  \node[box,right=of encode] (solve) {SAT solver tìm cycle cover};
+  \node[decision,below=of solve] (check) {Một chu trình duy nhất?};
+  \node[box,left=of check,fill=lightgreen] (done) {Trả về tour hợp lệ};
+  \node[box,right=of check,fill=lightblue] (refine) {Sinh cut-set và refine};
+  \draw[arrow] (encode)--(solve);
+  \draw[arrow] (solve)--(check);
+  \draw[arrow] (check)--node[above,font=\scriptsize]{Có} (done);
+  \draw[arrow] (check)--node[above,font=\scriptsize]{Không} (refine);
+  \draw[arrow] (refine) |- ([yshift=7mm]solve.north) -- (solve.north);
+\end{tikzpicture}
+\caption{Vòng lặp CEGAR cho HCP.}
+\end{figure}
+
+\section{Blocking subcycle và cut-set khác nhau thế nào?}
+
+Giả sử solver tạo ra một chu trình con trên tập đỉnh $S$.
+
+\textbf{Blocking subcycle} nói: ``Không được chọn lại chính xác các cạnh tạo ra chu trình con này.'' Cách này có thể chỉ loại một cấu hình rất cụ thể.
+
+\textbf{Cut-set} nhìn rộng hơn. Gọi $\delta(S)$ là tập cạnh nối một đỉnh trong $S$ với một đỉnh ngoài $S$. Một chu trình Hamilton phải đi ra và quay lại $S$, nên cần ít nhất hai cạnh qua biên:
+
+\[
+  \sum_{e\in\delta(S)} x_e \geq 2.
+\]
+
+\begin{intuitionbox}[Ví dụ hòn đảo]
+Hãy hình dung $S$ là một hòn đảo. Một tour đi qua toàn bộ bản đồ phải có đường vào và đường ra khỏi đảo. Cut-set không chỉ cấm một con đường nội bộ cụ thể; nó buộc lời giải phải kết nối đảo với bên ngoài.
+\end{intuitionbox}
+
+\section{2-opt và 3-opt: sửa lời giải thay vì bỏ đi}
+
+Khi SAT trả về nhiều chu trình, ta không nhất thiết loại ngay lời giải đó. Nếu hai chu trình có các cạnh chéo thích hợp, 2-opt có thể tháo hai cạnh và nối lại để hợp nhất chúng. Restricted 3-opt thử một phép nối phức tạp hơn với ba cạnh.
+
+Nếu sửa thành công, ta có lời giải mà không cần gọi SAT thêm. Nếu chỉ sửa được một phần, cycle cover đã cải thiện có thể cung cấp thông tin cho bước refine.
+
+\begin{warningbox}
+Patcher là heuristic: nó có thể giúp rất nhiều trên một họ graph nhưng tốn thời gian hoặc dẫn tìm kiếm về cùng một attractor trên họ khác. Vì vậy phương pháp mới không nên bật mọi patcher vô điều kiện.
+\end{warningbox}
+
+\chapter{Ta học được gì từ các baseline?}
+
+\section{Phân biệt cấu hình đơn, portfolio và VBS}
+
+Ba khái niệm thường bị nhầm lẫn:
+
+\begin{tabularx}{\textwidth}{>{\bfseries\sffamily}p{31mm} X X}
+\toprule
+Khái niệm & Cách hoạt động & Có thể chạy như một solver thật? \\
+\midrule
+Cấu hình đơn & Một bộ tham số cố định cho mọi instance. & Có. \\
+Portfolio tĩnh & Thử nhiều cấu hình theo thứ tự cố định, dùng chung một ngân sách được quy định trước. & Có, nếu ngân sách tổng được tính công bằng. \\
+VBS & Sau khi biết mọi kết quả, chọn hồi tố cấu hình tốt nhất cho từng instance. & Không. Đây là oracle và chỉ là cận trên. \\
+\bottomrule
+\end{tabularx}
+
+\section{Bức tranh dữ liệu hiện có}
+
+Dữ liệu per-instance trong repository cho thấy:
+
+\begin{table}[H]
+\centering
+\begin{tabularx}{\textwidth}{X r X}
+\toprule
+Kết quả & Số instance & Cách diễn giải \\
+\midrule
+SAT-CEGAR tốt nhất, một cấu hình & 957/1001 & Mốc thực tế mạnh nhất trong các cột CEGAR đã ghi nhận. \\
+Union của 16 biến thể SAT-CEGAR & 963/1001 & VBS trong họ SAT-CEGAR; chưa phải một solver đơn. \\
+Union của 21 phương pháp có log đầy đủ & 968/1001 & Bao gồm các lời giải bổ sung của ASP và Picat. \\
+Core chưa được 21 phương pháp giải & 33/1001 & Mục tiêu nghiên cứu quan trọng nhất. \\
+HCup outside-mergecutset & 937/1001 & Tổng do bài HCup báo cáo; chưa có log per-instance cục bộ để tính overlap. \\
+HCup hfp-preventsubcycle & 917/1001 & Cấu hình user propagator đơn mạnh nhất trong báo cáo HCup. \\
+HCup VBS-propagator & 961/1001 & Oracle trên nhiều cấu hình, không phải một solver đơn. \\
+\bottomrule
+\end{tabularx}
+\caption{Các mốc coverage cần phân biệt khi thiết kế phương pháp mới.}
+\end{table}
+
+\begin{resultbox}[Thông điệp từ các con số]
+Không có một kỹ thuật đơn lẻ thắng trên mọi graph. Muốn vượt mốc 957 bằng một phương pháp thực, ta phải tận dụng tính bổ sung giữa encoding, CEGAR, inprocessing, model repair và user propagation, nhưng phải có cơ chế chọn đúng thời điểm.
+\end{resultbox}
+
+\section{Bài học cụ thể từ từng baseline}
+
+\begin{longtable}{>{\raggedright\arraybackslash\bfseries\sffamily}p{28mm} >{\raggedright\arraybackslash}p{50mm} >{\raggedright\arraybackslash}p{66mm}}
+\toprule
+Nguồn & Kỹ thuật đáng học & Cách đưa vào phương pháp chung \\
+\midrule
+\endfirsthead
+\toprule
+Nguồn & Kỹ thuật đáng học & Cách đưa vào phương pháp chung \\
+\midrule
+\endhead
+CEGAR cũ & Incremental SAT và subtour elimination. & Là backbone bảo đảm tính đúng và tính đầy đủ. \\
+CEGAR cut-set & Cut-set mạnh hơn blocking một cycle cụ thể; 2-loop, symmetry và 2-opt. & Dùng làm phase khởi đầu nhanh và làm ngôn ngữ chung cho cut pool. \\
+CCaDical variants & Một cấu hình đơn đạt coverage rất cao. & Backend mặc định; không nên thay thế trước khi có bằng chứng paired. \\
+Sinz variants & Có các unique win so với CCaDical. & Encoding thay thế khi telemetry cho thấy phase đầu bị hardening. \\
+HCup outside-mergecutset & Merge cycle cover kết hợp inprocessing của CaDiCaL. & Chế độ CEGAR chính cho graph phù hợp, đặc biệt khi inprocessing có lợi. \\
+HCup HFP & Prevent-subcycle can thiệp ngay trong quá trình CDCL. & Phase chuyên biệt cho merge stall và graph nhiều đỉnh bậc 2. \\
+ASP & Biểu diễn connectivity/nogood toàn cục có tính bổ sung. & Chuyển ý tưởng đã kiểm chứng thành component hoặc reachability cuts trong SAT. \\
+Picat & Có một unique win đã ghi nhận trên graph725. & Chưa đủ bằng chứng cơ chế; cần source và trace trước khi kết luận kỹ thuật nào tạo ra lợi ích. \\
+HCP hiện tại & Nhiều prepass, patcher và decomposition. & Giữ dưới dạng module có gate; không bật toàn bộ mặc định. \\
+\bottomrule
+\end{longtable}
+
+\chapter{Phương pháp đề xuất: Adaptive Hybrid SAT-HCP}
+
+\section{Một phương pháp, không phải một túi solver}
+
+Phương pháp đề xuất có một executable và một controller cố định. Bên trong, nó có thể chuyển phase hoặc rebuild SAT state, nhưng mọi quyết định phải dựa trên đặc trưng graph và telemetry quan sát được trong lúc chạy, không dựa trên đáp án của test set.
+
+Ta gọi phương pháp là \textbf{Adaptive Hybrid SAT-HCP}, viết tắt \textbf{AHS-HCP}.
+
+\section{Năm nguyên tắc thiết kế}
+
+\begin{enumerate}
+  \item \textbf{SAT là lõi chính xác:} mọi heuristic chỉ đề xuất hoặc sửa lời giải; tour cuối phải được kiểm chứng.
+  \item \textbf{Cut ở mức đồ thị là tri thức chung:} cut-set được lưu bằng đỉnh/cạnh, có thể mã hóa lại khi đổi encoding.
+  \item \textbf{Thích nghi có kiểm soát:} chỉ bật module khi tín hiệu cho thấy nó phù hợp.
+  \item \textbf{Tổng ngân sách là cố định:} mọi phase chia sẻ cùng giới hạn 1800 giây.
+  \item \textbf{Có thể giải thích:} log phải nói rõ vì sao controller chuyển phase.
+\end{enumerate}
+
+\section{Kiến trúc tổng thể}
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  node distance=8mm and 10mm,
+  block/.style={rounded corners=1.5mm,draw=navy,fill=paper,minimum height=11mm,minimum width=35mm,align=center,font=\sffamily\small},
+  data/.style={rounded corners=1.5mm,draw=cyan,fill=lightblue,minimum height=10mm,minimum width=33mm,align=center,font=\sffamily\small},
+  phase/.style={rounded corners=1.5mm,draw=green,fill=lightgreen,minimum height=12mm,minimum width=42mm,align=center,font=\sffamily\small\bfseries},
+  arrow/.style={-Latex,thick,draw=muted}
+]
+  \node[block] (graph) {Graph đầu vào};
+  \node[block,right=of graph] (prep) {Safe preprocessing\\và feature extraction};
+  \node[data,right=of prep] (controller) {Hybrid Controller};
+
+  \node[phase,below left=16mm and 22mm of controller] (cegar) {Phase A\\CEGAR + inprocessing};
+  \node[phase,below=16mm of controller] (repair) {Phase B\\SAT-guided repair};
+  \node[phase,below right=16mm and 22mm of controller] (up) {Phase C\\Prevent-subcycle UP};
+
+  \node[data,below=18mm of repair] (pool) {GraphCutPool\\Cycle-cover cache\\Phase hints};
+  \node[block,right=17mm of pool] (verify) {Tour verifier};
+
+  \draw[arrow] (graph)--(prep)--(controller);
+  \draw[arrow] (controller)--(cegar);
+  \draw[arrow] (controller)--(repair);
+  \draw[arrow] (controller)--(up);
+  \draw[arrow] (cegar)--(pool);
+  \draw[arrow] (repair)--(pool);
+  \draw[arrow] (up)--(pool);
+  \draw[arrow,bend left=15] (pool) to (controller);
+  \draw[arrow] (pool)--(verify);
+\end{tikzpicture}}
+\caption{Các backend không hoạt động độc lập: chúng trao đổi tri thức qua cut pool và được điều phối bởi một controller duy nhất.}
+\label{fig:architecture}
+\end{figure}
+
+\section{Phase A: CEGAR có inprocessing}
+
+Phase A bắt đầu bằng cấu hình SAT-CEGAR mạnh nhất đã biết. CaDiCaL được phép dùng inprocessing để rút gọn công thức và cấu trúc tìm kiếm.
+
+Mỗi cycle cover được xử lý theo thứ tự:
+
+\begin{enumerate}
+  \item kiểm tra có phải một chu trình Hamilton hay không;
+  \item thử 2-opt hoặc restricted 3-opt khi xác suất merge cao;
+  \item sinh cut-set cho các component còn lại;
+  \item ghi telemetry rồi gọi SAT tiếp.
+\end{enumerate}
+
+\section{Phase B: SAT-guided repair}
+
+Thay vì để patcher heuristic thử vô hạn, Phase B biến việc sửa cycle cover thành một bài toán SAT nhỏ hơn:
+
+\begin{itemize}
+  \item giữ các cạnh ``tốt'' bằng assumptions;
+  \item chỉ mở các cạnh quanh biên giữa các subcycle;
+  \item nếu bài toán nhỏ UNSAT, dùng thông tin thất bại để mở rộng vùng sửa;
+  \item nếu tìm được tour, kiểm chứng trực tiếp trên graph gốc.
+\end{itemize}
+
+Đây là một dạng large-neighborhood search nhưng lõi tìm kiếm vẫn là SAT.
+
+\section{Phase C: prevent-subcycle user propagation}
+
+User propagator theo dõi assignment chưa hoàn chỉnh. Nếu một cạnh sắp đóng một chu trình nhỏ trước khi chứa tất cả đỉnh, propagator có thể đẩy literal tương ứng về false và cung cấp lý do cho solver.
+
+\begin{intuitionbox}
+CEGAR thường đợi SAT solver dựng xong một cycle cover sai rồi mới sửa. User propagation giống như người giám sát phát hiện vòng nhỏ đang sắp khép lại và ngăn nó ngay trong lúc xây dựng.
+\end{intuitionbox}
+
+\section{Vì sao cần rebuild giữa Phase A và Phase C?}
+
+Inprocessing có thể đổi, loại hoặc gộp biến nội bộ. User propagator lại cần ánh xạ ổn định giữa biến SAT và cạnh graph. Do đó hai lợi ích này không luôn tương thích trong cùng một state.
+
+Giải pháp đề xuất:
+
+\begin{enumerate}
+  \item kết thúc Phase A tại một điểm chuyển an toàn;
+  \item xuất mọi graph cut độc lập encoding;
+  \item tạo SAT state mới ở chế độ tương thích IPASIR-UP;
+  \item mã hóa lại degree constraints và import graph cuts;
+  \item dùng cycle cover tốt nhất làm phase hint.
+\end{enumerate}
+
+Learned clause nội bộ không phải lúc nào chuyển được, nhưng cut-set ở mức graph thì chuyển được.
+
+\chapter{Hybrid Controller quyết định như thế nào?}
+
+\section{Telemetry tối thiểu}
+
+Sau mỗi vòng CEGAR, controller ghi:
+
+\begin{itemize}
+  \item số subcycle và phân bố kích thước;
+  \item số subcycle được 2-opt/3-opt hợp nhất;
+  \item số vòng liên tiếp không giảm cycle count;
+  \item thời gian SAT call gần nhất và tỷ lệ tăng;
+  \item số cut-set, độ dài cut và số blocking clause;
+  \item thời gian dành cho từng patcher;
+  \item graph density $m/n$, tỷ lệ đỉnh bậc 2, max degree và số hub.
+\end{itemize}
+
+\section{Controller luật trước, học máy sau}
+
+Phiên bản đầu nên dùng luật giải thích được:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{p{35mm} X X}
+\toprule
+Tín hiệu & Diễn giải khả dĩ & Hành động \\
+\midrule
+$m/n\geq 3$, nhiều hub & Dense graph; SAT branching và clause size có thể là nút thắt. & Duy trì inprocessing, ưu tiên merge-cutset; chỉ bật decomposition sau khi có stall. \\
+Nhiều đỉnh bậc 2, merge progress bằng 0 & Cycle cover dễ rơi vào các vòng nhỏ cưỡng bức. & Chuyển sang prevent-subcycle UP hoặc connectivity cuts mạnh hơn. \\
+Ít subcycle lớn, patcher liên tục giảm cycle count & Lời giải đang gần một tour. & Cho repair thêm ngân sách; chưa rebuild solver. \\
+Nhiều subcycle nhỏ lặp lại & Patcher có thể quay lại cùng attractor. & Giảm patching, thêm cut sớm và đa dạng phase. \\
+SAT call cuối chiếm phần lớn runtime & State có dấu hiệu hardening. & Export cut pool rồi rebuild với encoding/phase khác. \\
+\bottomrule
+\end{tabularx}
+\caption{Các luật controller ban đầu. Ngưỡng cụ thể phải được chọn trên training set.}
+\end{table}
+
+\section{Phân bổ ngân sách}
+
+Không nên cho mỗi backend 1800 giây rồi cộng kết quả, vì như vậy phương pháp hybrid được hưởng nhiều tài nguyên hơn baseline. Một cách công bằng là:
+
+\[
+  T_{\mathrm{preprocess}}+T_A+T_B+T_C \leq 1800\text{ giây}.
+\]
+
+Controller có thể chuyển phase theo sự kiện thay vì một mốc thời gian cứng. Ví dụ, Phase A tiếp tục khi vẫn tạo tiến bộ; nó chuyển sớm nếu nhiều vòng liên tiếp không cải thiện và SAT call tăng nhanh.
+
+\begin{warningbox}[Không dùng oracle trá hình]
+Không được nhìn tên graph rồi tra bảng ``solver nào từng thắng''. Quy tắc phải dựa trên đặc trưng tính được từ graph hoặc telemetry sinh ra trong lần chạy hiện tại. Nếu không, kết quả chỉ là memorization của benchmark.
+\end{warningbox}
+
+\chapter{Các hướng brainstorming có tiềm năng}
+
+\section{Encoding lai theo từng đỉnh}
+
+Không nhất thiết mọi đỉnh phải dùng cùng một cardinality encoding:
+
+\begin{itemize}
+  \item bậc thấp: pairwise hoặc binomial, ít biến phụ;
+  \item bậc trung bình: Sinz, lan truyền ổn định;
+  \item hub bậc cao: commander hoặc encoding phân cấp.
+\end{itemize}
+
+Đây là một công thức SAT duy nhất nhưng được thiết kế theo cấu trúc cục bộ của graph.
+
+\section{GraphCutPool độc lập encoding}
+
+Mỗi cut được lưu ở dạng cấu trúc:
+
+\[
+  (S,\,\delta(S),\,\text{nguồn},\,\text{số lần hữu ích},\,\text{thời điểm tạo}).
+\]
+
+Khi rebuild, cut được dịch sang biến của encoding mới. Có thể xếp hạng cut theo độ ngắn, số lần propagation hoặc mức độ tái xuất hiện của component.
+
+\section{Phase hints từ cycle cover tốt nhất}
+
+Khi tạo SAT state mới:
+
+\begin{itemize}
+  \item ưu tiên true cho cạnh thuộc cycle cover tốt nhất;
+  \item ưu tiên false cho cạnh nhiều lần đóng subcycle xấu;
+  \item giảm dần độ tin cậy sau mỗi lần thất bại để tránh khóa vào attractor.
+\end{itemize}
+
+\section{Tổng quát hóa cut theo xung đột}
+
+Nếu nhiều cycle cover khác nhau liên tục tạo cùng một phân hoạch component, ta có thể tổng quát hóa các blocking clause riêng lẻ thành một connectivity cut mạnh hơn. Đây là nơi có thể hấp thụ trực giác về nogood toàn cục từ ASP mà vẫn giữ backend SAT.
+
+\section{Học controller bằng dữ liệu}
+
+Sau khi có log đầy đủ, một mô hình nhỏ có thể dự đoán:
+
+\begin{itemize}
+  \item encoding khởi đầu;
+  \item có nên bật user propagation;
+  \item thời điểm chuyển phase;
+  \item patcher nào đáng chạy;
+  \item cách chia ngân sách.
+\end{itemize}
+
+Tuy nhiên, 1001 instance là tập dữ liệu nhỏ và chứa nhiều graph cùng họ. Phải chia train/test theo \emph{họ cấu trúc}, không chia ngẫu nhiên từng graph. Nếu graph950 được train còn graph963 gần như cùng cấu trúc nằm trong test, kết quả có thể bị leakage.
+
+\chapter{Thiết kế thực nghiệm công bằng}
+
+\section{Câu hỏi nghiên cứu}
+
+\begin{description}
+  \item[RQ1.] Một controller đơn có vượt cấu hình SAT-CEGAR đơn tốt nhất 957/1001 không?
+  \item[RQ2.] Cut transfer giữa phase có tạo unique wins hay chỉ thêm overhead?
+  \item[RQ3.] Prevent-subcycle UP có bổ sung cho CEGAR inprocessing trên core-33 không?
+  \item[RQ4.] SAT-guided repair có thắng 2-opt/3-opt thuần trên nhóm merge stall không?
+  \item[RQ5.] Encoding lai theo đỉnh có giảm runtime mà không gây regression trên easy set không?
+\end{description}
+
+\section{Ba mức kết quả phải báo cáo riêng}
+
+\begin{enumerate}
+  \item \textbf{Single static SAT:} cấu hình cố định, mốc tham chiếu 957.
+  \item \textbf{Adaptive single-method SAT:} AHS-HCP, một executable và một ngân sách tổng.
+  \item \textbf{Unrestricted portfolio:} có thể bao gồm ASP/Picat, dùng để đo coverage thực dụng tối đa.
+\end{enumerate}
+
+\section{Tập đánh giá trọng tâm}
+
+Ngoài full set 1001 graph, cần theo dõi:
+
+\begin{itemize}
+  \item \textbf{Core-33:} chưa được 21 phương pháp có log đầy đủ giải.
+  \item \textbf{SAT-only open-38:} core-33 cộng graph677, graph725, graph744, graph810 và graph940, vốn đang được ASP/Picat bổ sung.
+  \item \textbf{Easy-overhead set:} kiểm tra phương pháp thích nghi không làm graph dễ chậm đi quá nhiều.
+  \item \textbf{Các họ cấu trúc:} dense B1, merge-stall B2a, long-call B2b và attractor A.
+\end{itemize}
+
+\section{Chỉ số đánh giá}
+
+\begin{tabularx}{\textwidth}{>{\bfseries\sffamily}p{30mm} X}
+\toprule
+Chỉ số & Ý nghĩa \\
+\midrule
+Solved count & Số instance có tour hợp lệ trong cap. Đây là chỉ số chính. \\
+PAR-2 & Runtime nếu giải được; phạt $2\times$ timeout nếu không giải. Phản ánh cả tốc độ và độ bền. \\
+Median/p90 & Tốc độ trên phần instance đã giải. Không thay thế solved count. \\
+Unique wins & Instance chỉ phương pháp này giải được; cho thấy tính bổ sung thực. \\
+Marginal gain & Số instance một phase bổ sung sau các phase trước. \\
+Phase overhead & Thời gian controller, rebuild, encoding, patching và verification. \\
+\bottomrule
+\end{tabularx}
+
+\section{Ablation bắt buộc}
+
+\begin{table}[H]
+\centering
+\begin{tabularx}{\textwidth}{X c c c c}
+\toprule
+Cấu hình & Cut pool & Repair SAT & UP & Controller \\
+\midrule
+CEGAR base & \no & \no & \no & \no \\
++ cut transfer & \yes & \no & \no & \no \\
++ SAT-guided repair & \yes & \yes & \no & \no \\
++ user propagation & \yes & \yes & \yes & \no \\
+AHS-HCP đầy đủ & \yes & \yes & \yes & \yes \\
+\bottomrule
+\end{tabularx}
+\caption{Ablation giúp xác định module nào thực sự tạo lợi ích.}
+\end{table}
+
+\begin{resultbox}[Tiêu chuẩn để tuyên bố cải tiến]
+Phương pháp mới phải được chạy như một cấu hình đã chốt, trên cùng máy, cùng giới hạn CPU/RAM, cùng verifier và cùng cách tính timeout. Không so runtime trực tiếp giữa các CSV được đo trên phần cứng khác nhau.
+\end{resultbox}
+
+\chapter{Lộ trình triển khai}
+
+\section{Giai đoạn 0: hoàn thiện bằng chứng}
+
+\begin{enumerate}
+  \item Chạy hai cấu hình HCup mạnh nhất trên core-33.
+  \item Import JSONL vào bảng coverage động.
+  \item Xác định graph nào HCup bổ sung cho SAT-CEGAR.
+  \item Thu telemetry thống nhất cho CEGAR và HCup.
+\end{enumerate}
+
+\section{Giai đoạn 1: GraphCutPool và telemetry}
+
+Đây là bước rủi ro thấp nhất và có giá trị độc lập:
+
+\begin{itemize}
+  \item định nghĩa cut ở mức graph;
+  \item gắn provenance và thống kê sử dụng;
+  \item xuất/import cut khi rebuild;
+  \item bảo đảm mọi cut đều sound bằng unit test trên graph nhỏ.
+\end{itemize}
+
+\section{Giai đoạn 2: Hybrid Controller luật}
+
+Controller ban đầu chỉ cần một state machine nhỏ:
+
+\begin{enumerate}
+  \item \code{FAST\_CEGAR};
+  \item \code{SAT\_REPAIR};
+  \item \code{UP\_REBUILD};
+  \item \code{FINAL\_FALLBACK};
+  \item \code{SOLVED} hoặc \code{TIMEOUT}.
+\end{enumerate}
+
+Mọi chuyển state phải ghi event, lý do, thời gian còn lại và snapshot telemetry.
+
+\section{Giai đoạn 3: tích hợp kỹ thuật HCup}
+
+Có hai mức tích hợp:
+
+\begin{description}
+  \item[Mức thực nghiệm nhanh.] Một driver cố định điều phối hai binary và dùng chung file cut/cycle-cover. Dễ kiểm chứng ý tưởng nhưng vẫn có overhead process.
+  \item[Mức phương pháp hoàn chỉnh.] Port prevent-subcycle hoặc đóng gói HCup thành library có API ổn định. Khi đó controller, cut pool và verifier nằm trong một executable.
+\end{description}
+
+Nên chứng minh tính bổ sung ở mức driver trước, rồi mới trả chi phí port sâu.
+
+\section{Giai đoạn 4: cải tiến mới và học selector}
+
+Chỉ sau khi controller luật ổn định mới thử encoding lai, SAT-guided LNS và model học. Mỗi ý tưởng cần một ablation riêng; nếu gộp nhiều thay đổi cùng lúc, ta không biết nguyên nhân của thắng hoặc thua.
+
+\chapter{Pseudocode dễ đọc}
+
+\begin{tcolorbox}[breakable,colback=paper,colframe=navy,title={\sffamily\bfseries Thuật toán AHS-HCP},fontupper=\ttfamily\small]
+INPUT: graph G, total budget T\\
+OUTPUT: verified Hamiltonian cycle, or UNKNOWN\\[1mm]
+
+1. preprocess G using only sound reductions\\
+2. compute structural features\\
+3. create GraphCutPool and HybridController\\
+4. start Phase A: CEGAR with inprocessing\\
+5. while remaining time $>$ 0:\\
+\hspace*{5mm}a. ask SAT for a candidate cycle cover\\
+\hspace*{5mm}b. if candidate is one cycle: verify and return it\\
+\hspace*{5mm}c. try the repair selected by Controller\\
+\hspace*{5mm}d. if repair creates one cycle: verify and return it\\
+\hspace*{5mm}e. generate sound graph cuts and store them\\
+\hspace*{5mm}f. update telemetry\\
+\hspace*{5mm}g. if Controller requests a phase change:\\
+\hspace*{10mm}- export graph cuts and best cycle cover\\
+\hspace*{10mm}- rebuild the selected SAT mode\\
+\hspace*{10mm}- import cuts and phase hints\\
+6. return UNKNOWN
+\end{tcolorbox}
+
+\chapter{Câu hỏi thường gặp}
+
+\section*{Phương pháp này có còn là SAT-only không?}
+
+Có, nếu ASP và Picat chỉ được dùng làm nguồn ý tưởng hoặc baseline, còn mọi phase tìm kiếm của AHS-HCP đều dựa trên SAT/CaDiCaL, cut-set và user propagation.
+
+\section*{Rebuild solver có làm mất hết công sức cũ không?}
+
+Một phần learned clause nội bộ có thể mất, nhưng graph cuts, cycle cover tốt nhất, phase hints và telemetry vẫn được giữ. Mục tiêu nghiên cứu là chứng minh phần tri thức chuyển được bù lại chi phí rebuild.
+
+\section*{Tại sao không chạy CEGAR và HCup song song?}
+
+Chạy song song có thể tăng coverage thực dụng, nhưng dùng nhiều CPU hơn baseline. Đây có thể là một chế độ portfolio đa lõi riêng, không nên dùng làm kết quả chính cho phương pháp một lõi.
+
+\section*{Có nên dùng học máy ngay không?}
+
+Chưa. Trước hết cần log đầy đủ và controller luật làm baseline. Nếu học máy được thêm quá sớm, rất khó phân biệt lợi ích thật với overfitting vào 1001 graph.
+
+\section*{Nếu trả về SAT thì đã chắc chắn đúng chưa?}
+
+Chưa. Luôn phải kiểm tra rằng tour chứa đúng mọi đỉnh một lần và mọi cặp liên tiếp là cạnh hợp lệ, kể cả cạnh quay về điểm đầu.
+
+\appendix
+
+\chapter{Bảng thuật ngữ}
+
+\begin{longtable}{>{\raggedright\arraybackslash\bfseries\sffamily}p{34mm} >{\raggedright\arraybackslash}p{116mm}}
+\toprule
+Thuật ngữ & Giải thích ngắn \\
+\midrule
+\endfirsthead
+\toprule
+Thuật ngữ & Giải thích ngắn \\
+\midrule
+\endhead
+Assignment & Một cách gán đúng/sai cho các biến SAT. \\
+Baseline & Phương pháp tham chiếu dùng để so sánh. \\
+Blocking clause & Clause được thêm để ngăn solver lặp lại một cấu hình sai. \\
+CaDiCaL & SAT solver CDCL hiện đại được dùng trong các phương pháp đang xét. \\
+CEGAR & Vòng lặp giải abstraction, tìm counterexample rồi refine. \\
+Clause & Phép hoặc của các literal. \\
+CNF & Phép và của nhiều clause. \\
+Cut-set & Tập cạnh đi qua biên của một tập đỉnh. \\
+Cycle cover & Tập nhiều chu trình rời nhau phủ toàn bộ đỉnh. \\
+Encoding & Cách chuyển ràng buộc bài toán sang clause SAT. \\
+Inprocessing & Các phép rút gọn công thức được SAT solver thực hiện trong lúc giải. \\
+IPASIR-UP & Giao diện cho phép user propagator tương tác với SAT solver. \\
+Literal & Một biến hoặc phủ định của biến. \\
+PAR-2 & Chỉ số runtime phạt timeout bằng hai lần cap. \\
+Phase hint & Gợi ý giá trị đúng/sai ưu tiên khi solver bắt đầu tìm kiếm. \\
+Subcycle & Chu trình chỉ chứa một phần đỉnh của graph. \\
+Telemetry & Dữ liệu đo động lực tìm kiếm trong lúc chạy. \\
+User propagator & Module ngoài cung cấp propagation hoặc clause chuyên biệt cho bài toán. \\
+VBS & Virtual Best Solver, oracle chọn kết quả tốt nhất sau khi đã biết mọi run. \\
+\bottomrule
+\end{longtable}
+
+\chapter{Tái tạo báo cáo coverage và benchmark}
+
+Biên dịch chính tài liệu này bằng XeLaTeX:
+
+\begin{verbatim}
+mkdir -p output/pdf
+latexmk -xelatex -interaction=nonstopmode \
+  -outdir=output/pdf docs/adaptive-hybrid-sat-hcp.tex
+\end{verbatim}
+
+Sinh lại các CSV coverage:
+
+\begin{verbatim}
+python3 tools/build_hybrid_coverage.py
+\end{verbatim}
+
+Chạy hai cấu hình HCup mặc định trên core-33:
+
+\begin{verbatim}
+python3 tools/hcp_benchmark.py \
+  --config benchmarks/hybrid_variants.json \
+  --set historical_open_33 \
+  --stop-on-solved \
+  --output benchmark-runs/hcup-open33
+\end{verbatim}
+
+Import kết quả mới vào coverage động:
+
+\begin{verbatim}
+python3 tools/build_hybrid_coverage.py \
+  --benchmark-results benchmark-runs/hcup-open33/results.jsonl
+\end{verbatim}
+
+\chapter{Tài liệu tham khảo}
+
+\begin{thebibliography}{9}
+
+\bibitem{ohashi2025}
+R. Ohashi, T. Soh, D. Le Berre, H. Nabeshima, M. Banbara, K. Inoue, và N. Tamura.
+\newblock \emph{SAT-Based CEGAR Method for the Hamiltonian Cycle Problem Enhanced by Cut-Set Constraints}.
+\newblock SAT 2025, LIPIcs 341, Article 24, 2025.
+
+\bibitem{funder2026}
+F. Funder.
+\newblock \emph{An UPgrade for HCP: Solving the Hamiltonian Cycle Problem via User Propagators}.
+\newblock Diplomarbeit, Technische Universität Wien, 2026.
+
+\bibitem{biere2009}
+A. Biere, M. Heule, H. van Maaren, và T. Walsh, biên tập.
+\newblock \emph{Handbook of Satisfiability}.
+\newblock IOS Press, 2009.
+
+\bibitem{karp1972}
+R. M. Karp.
+\newblock Reducibility among combinatorial problems.
+\newblock Trong \emph{Complexity of Computer Computations}, 1972.
+
+\end{thebibliography}
+
+\vfill
+\begin{center}
+\sffamily\small\color{muted}
+Tài liệu này đi kèm mã nguồn và pipeline kiểm chứng trong repository HCP-CEGAR.
+\end{center}
+
+\end{document}
