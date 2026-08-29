@@ -69,6 +69,12 @@ class HybridCoverageTests(unittest.TestCase):
             for item in self.data.observations
             if self.data.methods[item.method_id].family == "current_regression_300s"
         ]
+        # The raw 48-hour console log is a local experimental artifact and is
+        # intentionally not required to build or run the public source tree.
+        # When it is present, retain the exact audit assertions below.
+        if not regression:
+            self.assertFalse((coverage.ROOT.parent / "regression-48h.console.log").is_file())
+            return
         self.assertEqual(sum(item.status == coverage.INCOMPLETE for item in regression), 1)
         self.assertEqual(sum(item.status != coverage.INCOMPLETE for item in regression), 285)
         incomplete = next(item for item in regression if item.status == coverage.INCOMPLETE)
