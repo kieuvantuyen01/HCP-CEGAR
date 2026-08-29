@@ -58,6 +58,14 @@
       "name": "paper_ccad_best_replay",
       "source_dir": "src/cegar-ffi",
       "binary": "src/cegar-ffi/target/release/cegar-ffi",
+      "build_prerequisites": [
+        {
+          "name": "cegar_fix_cadical_provider",
+          "source_dir": "src/cegar-fix",
+          "binary": "src/cegar-fix/target/release/cegar-fix",
+          "build_system": "cargo"
+        }
+      ],
       "options": {
         "-b": "3",
         "-y": "3",

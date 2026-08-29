@@ -409,12 +409,18 @@ def run_process(command: list[str], timeout_sec: float, env: dict[str, str]) -> 
         timed_out = True
         terminate_process(process)
         stdout, stderr = process.communicate()
+    except KeyboardInterrupt:
+        terminate_process(process)
+        process.communicate()
+        raise
     return process.returncode, stdout, stderr, timed_out, time.perf_counter() - started
 
 
 def build_variant(
     variant: dict[str, Any], env: dict[str, str], output_dir: Path
 ) -> Path:
+    for prerequisite in variant.get("build_prerequisites", []):
+        build_variant(prerequisite, env, output_dir)
     source_dir = (ROOT / variant["source_dir"]).resolve()
     build_system = variant.get("build_system", "cargo")
     if variant.get("isolated_build", False):
@@ -464,6 +470,8 @@ def build_variant(
             if result.returncode != 0:
                 raise RuntimeError(f"build failed for variant {variant['name']}")
         return build_dir / Path(variant["binary"]).name
+    if build_system == "none":
+        return (ROOT / variant["binary"]).resolve()
     raise ValueError(f"unknown build_system {build_system!r} for {variant['name']}")
 
 
@@ -624,6 +632,10 @@ def main() -> int:
         "controlled_environment": controlled_env,
         "strict_external_timeout": True,
         "timeout_sec": timeout_sec,
+        "external_timeout_grace_by_variant": {
+            variant["name"]: float(variant.get("external_timeout_grace_sec", 0.0))
+            for variant in selected
+        },
         "instance_set": args.instances or args.set_name,
         "graph_numbers": graph_numbers,
         "repetitions": args.repetitions,
@@ -672,7 +684,26 @@ def main() -> int:
             features, vertices, edges = graph_features(graph_path)
 
             binary = actual_binaries[variant["name"]]
-            tour_path = tour_dir / safe_name(variant["name"]) / f"graph{graph_number}-r{repetition}.hcp.tour"
+            artifact_variant = safe_name(variant["name"])
+            artifact_stem = f"graph{graph_number}-r{repetition}"
+            attempt = 1
+            while True:
+                attempt_suffix = "" if attempt == 1 else f"-attempt{attempt}"
+                candidate_stem = f"{artifact_stem}{attempt_suffix}"
+                candidate_tour = tour_dir / artifact_variant / f"{candidate_stem}.hcp.tour"
+                candidate_raw = raw_dir / artifact_variant / f"{candidate_stem}.txt"
+                candidate_run_dir = (
+                    output_dir / "artifacts" / artifact_variant / candidate_stem
+                )
+                if not (
+                    candidate_tour.exists()
+                    or candidate_raw.exists()
+                    or candidate_run_dir.exists()
+                ):
+                    break
+                attempt += 1
+            tour_path = candidate_tour
+            raw_path = candidate_raw
             tour_path.parent.mkdir(parents=True, exist_ok=True)
             input_flag = str(variant.get("input_flag", "-i"))
             command = [
@@ -686,12 +717,27 @@ def main() -> int:
                 command.extend(["--timeout", str(timeout_sec)])
             if variant.get("supports_output_tour", False):
                 command.extend(["--output-tour", str(tour_path)])
+            run_artifact_dir: Path | None = None
+            if variant.get("supports_run_dir", False):
+                run_artifact_dir = candidate_run_dir
+                command.extend(["--run-dir", str(run_artifact_dir)])
+
+            external_timeout_grace_sec = float(
+                variant.get("external_timeout_grace_sec", 0.0)
+            )
+            if external_timeout_grace_sec < 0:
+                raise ValueError(
+                    f"external_timeout_grace_sec must be non-negative for {variant['name']}"
+                )
+            external_timeout_sec = timeout_sec + external_timeout_grace_sec
 
             print(
                 f"[{task_index}/{total}] {variant['name']} graph{graph_number} r{repetition}",
                 flush=True,
             )
-            returncode, stdout, stderr, timed_out, wall_sec = run_process(command, timeout_sec, env)
+            returncode, stdout, stderr, timed_out, wall_sec = run_process(
+                command, external_timeout_sec, env
+            )
             parsed_status = (
                 "TIMEOUT"
                 if timed_out
@@ -707,7 +753,6 @@ def main() -> int:
             elif parsed_status == "NO_STATUS" and returncode not in (0, 10, 20):
                 status = "ERROR"
 
-            raw_path = raw_dir / safe_name(variant["name"]) / f"graph{graph_number}-r{repetition}.txt"
             raw_path.parent.mkdir(parents=True, exist_ok=True)
             raw_text = (
                 f"COMMAND: {json.dumps(command)}\n"
@@ -732,7 +777,10 @@ def main() -> int:
                 "graph_path": str(graph_path),
                 "graph_features": features,
                 "repetition": repetition,
+                "attempt": attempt,
                 "timeout_sec": timeout_sec,
+                "external_timeout_sec": external_timeout_sec,
+                "external_timeout_grace_sec": external_timeout_grace_sec,
                 "command": command,
                 "status": status,
                 "solver_status": parsed_status,
@@ -743,6 +791,7 @@ def main() -> int:
                 "verification_reason": verification_reason,
                 "tour_vertices": len(tour) if tour else None,
                 "tour_path": str(tour_path) if tour_path.is_file() else None,
+                "run_artifact_dir": str(run_artifact_dir) if run_artifact_dir else None,
                 "increments": int(increment_matches[-1]) if increment_matches else None,
                 "blocking_clauses": int(clause_matches[-1]) if clause_matches else None,
                 "phase_stats": phase_stats,

@@ -48,6 +48,18 @@ python3 tools/hcp_benchmark.py --set regression_core --timeout 1800
 
 The runner records an immutable manifest, JSONL results, raw logs, feature telemetry, and independently verifies every SAT tour. See [`docs/reproducible-benchmark.md`](docs/reproducible-benchmark.md).
 
+### Adaptive Hybrid SAT-HCP (AHS v0)
+
+AHS v0 runs the strongest replayed CEGAR configuration and HCup-HFP under one total budget. It routes only from reproducible graph features and accepts SAT only after independent tour verification.
+
+```bash
+./run_ahs.sh --build-only
+./run_ahs.sh --input FHCPCS-col/graph950.col --timeout 1800 --no-build
+./run_ahs_benchmark.sh --timeout 1800 --output benchmark-runs/ahs-open33-1800s
+```
+
+Implementation details, artifacts, policy fractions, and current limitations are documented in [`docs/ahs-implementation.md`](docs/ahs-implementation.md).
+
 For full CLI options and algorithmic descriptions, please refer to [`docs/rust_solver_architecture_and_methods.md`](docs/rust_solver_architecture_and_methods.md).
 
 ---

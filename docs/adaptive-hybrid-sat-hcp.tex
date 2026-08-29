@@ -78,22 +78,22 @@
 \newtcolorbox{intuitionbox}[1][Trực giác]{
   breakable,enhanced,colback=lightblue,colframe=blue,boxrule=0.7pt,
   arc=2mm,left=2.5mm,right=2.5mm,top=2mm,bottom=2mm,
-  title={\sffamily\bfseries #1},fonttitle=\color{navy}
+  title={\sffamily\bfseries #1},fonttitle=\color{white}
 }
 \newtcolorbox{examplebox}[1][Ví dụ]{
   breakable,enhanced,colback=lightgreen,colframe=green,boxrule=0.7pt,
   arc=2mm,left=2.5mm,right=2.5mm,top=2mm,bottom=2mm,
-  title={\sffamily\bfseries #1},fonttitle=\color{green}
+  title={\sffamily\bfseries #1},fonttitle=\color{white}
 }
 \newtcolorbox{warningbox}[1][Điểm cần cẩn thận]{
   breakable,enhanced,colback=lightorange,colframe=orange,boxrule=0.7pt,
   arc=2mm,left=2.5mm,right=2.5mm,top=2mm,bottom=2mm,
-  title={\sffamily\bfseries #1},fonttitle=\color{orange}
+  title={\sffamily\bfseries #1},fonttitle=\color{white}
 }
 \newtcolorbox{resultbox}[1][Kết luận chính]{
   breakable,enhanced,colback=paper,colframe=navy,boxrule=1pt,
   arc=2mm,left=3mm,right=3mm,top=2.5mm,bottom=2.5mm,
-  title={\sffamily\bfseries #1},fonttitle=\color{navy}
+  title={\sffamily\bfseries #1},fonttitle=\color{white}
 }
 
 \newcommand{\sat}{\textsc{sat}}
@@ -398,7 +398,7 @@ VBS & Sau khi biết mọi kết quả, chọn hồi tố cấu hình tốt nh�
 
 \section{Bức tranh dữ liệu hiện có}
 
-Dữ liệu per-instance trong repository cho thấy:
+Dữ liệu cục bộ và các tổng do hai bài báo công bố cho thấy:
 
 \begin{table}[H]
 \centering
@@ -406,10 +406,12 @@ Dữ liệu per-instance trong repository cho thấy:
 \toprule
 Kết quả & Số instance & Cách diễn giải \\
 \midrule
+Bài Ohashi et al. 2025, cấu hình \code{-asym} & 937/1001 & Kết quả cấu hình đơn do bài báo công bố, với cap 1800 giây. \\
+Baseline cục bộ chính thức & 926/1001 & Lần chạy trên mã nguồn đã chỉnh sửa với \code{--three-opt 1}; đây không phải kết quả gốc của bài SAT 2025. \\
 SAT-CEGAR tốt nhất, một cấu hình & 957/1001 & Mốc thực tế mạnh nhất trong các cột CEGAR đã ghi nhận. \\
 Union của 16 biến thể SAT-CEGAR & 963/1001 & VBS trong họ SAT-CEGAR; chưa phải một solver đơn. \\
-Union của 21 phương pháp có log đầy đủ & 968/1001 & Bao gồm các lời giải bổ sung của ASP và Picat. \\
-Core chưa được 21 phương pháp giải & 33/1001 & Mục tiêu nghiên cứu quan trọng nhất. \\
+Union của 21 phương pháp có log đầy đủ & 968/1001 & Portfolio giải thích union này lần lượt nhận thêm 8 graph từ ASP, 2 từ Sinz và 1 từ Picat. Các số này phụ thuộc thứ tự portfolio. \\
+Core chưa được 21 phương pháp giải & 33/1001 & Chưa thể kết luận HCup cũng timeout vì chưa có log HCup per-instance cục bộ. \\
 HCup outside-mergecutset & 937/1001 & Tổng do bài HCup báo cáo; chưa có log per-instance cục bộ để tính overlap. \\
 HCup hfp-preventsubcycle & 917/1001 & Cấu hình user propagator đơn mạnh nhất trong báo cáo HCup. \\
 HCup VBS-propagator & 961/1001 & Oracle trên nhiều cấu hình, không phải một solver đơn. \\
@@ -418,8 +420,10 @@ HCup VBS-propagator & 961/1001 & Oracle trên nhiều cấu hình, không phải
 \caption{Các mốc coverage cần phân biệt khi thiết kế phương pháp mới.}
 \end{table}
 
+Log regression 48 giờ ở cap 300 giây bị ngắt giữa task 286: có 285 task hoàn thành, một task đã bắt đầu nhưng chưa có kết quả và 194 task chưa chạy. Trong phần hoàn thành có 26 run SAT thuộc sáu graph, nhưng tất cả các graph đó đã được phương pháp cũ giải. Log này chưa bổ sung coverage và chưa giải instance core-33 nào. Task chưa chạy phải ghi là \code{MISSING}, không phải \code{TIMEOUT}.
+
 \begin{resultbox}[Thông điệp từ các con số]
-Không có một kỹ thuật đơn lẻ thắng trên mọi graph. Muốn vượt mốc 957 bằng một phương pháp thực, ta phải tận dụng tính bổ sung giữa encoding, CEGAR, inprocessing, model repair và user propagation, nhưng phải có cơ chế chọn đúng thời điểm.
+Dữ liệu cục bộ cho thấy encoding và một số baseline có lời giải bổ sung cho nhau. Riêng tính bổ sung giữa CEGAR và HCup chưa được đo theo từng instance. Vì vậy, kết hợp CEGAR, model repair và user propagation là giả thuyết trung tâm cần kiểm nghiệm, chưa phải kết quả đã chứng minh.
 \end{resultbox}
 
 \section{Bài học cụ thể từ từng baseline}
@@ -437,9 +441,12 @@ CEGAR cũ & Incremental SAT và subtour elimination. & Là backbone bảo đảm
 CEGAR cut-set & Cut-set mạnh hơn blocking một cycle cụ thể; 2-loop, symmetry và 2-opt. & Dùng làm phase khởi đầu nhanh và làm ngôn ngữ chung cho cut pool. \\
 CCaDical variants & Một cấu hình đơn đạt coverage rất cao. & Backend mặc định; không nên thay thế trước khi có bằng chứng paired. \\
 Sinz variants & Có các unique win so với CCaDical. & Encoding thay thế khi telemetry cho thấy phase đầu bị hardening. \\
-HCup outside-mergecutset & Merge cycle cover kết hợp inprocessing của CaDiCaL. & Chế độ CEGAR chính cho graph phù hợp, đặc biệt khi inprocessing có lợi. \\
-HCup HFP & Prevent-subcycle can thiệp ngay trong quá trình CDCL. & Phase chuyên biệt cho merge stall và graph nhiều đỉnh bậc 2. \\
-ASP & Biểu diễn connectivity/nogood toàn cục có tính bổ sung. & Chuyển ý tưởng đã kiểm chứng thành component hoặc reachability cuts trong SAT. \\
+HCup outside-mergecutset & Áp dụng 2-opt exhaustively trước khi sinh cut-set và giữ inprocessing của CaDiCaL. & Là baseline CEGAR mạnh cần chạy cùng điều kiện trước khi chọn làm Phase A. \\
+HCup HFP & Prevent-subcycle can thiệp trên assignment chưa hoàn chỉnh; cấu hình đơn giải 917 graph. & Candidate cho Phase C; phải đo unique win trên 44 timeout của cấu hình CEGAR-957. \\
+HCup inside-mergecutset & Kiểm tra model hoàn chỉnh bên trong một lần gọi SAT và giữ assignment trail; giải 871 graph. & Phân biệt với HFP: ``inside'' không có nghĩa là phát hiện subcycle trên assignment chưa hoàn chỉnh. \\
+HCup user decision & \code{hfp-heat} giải 842 graph, thấp hơn HFP prevent-subcycle. & Chỉ nên là ablation phụ, không phải module mặc định. \\
+HCup pair-cutset & Hai biến thể công bố chỉ giải 399 và 754 graph; clause có thể rất lớn và dễ thỏa. & Xem như kết quả âm và không đưa vào pipeline mặc định. \\
+ASP & Trong portfolio cố định, ASP bổ sung 8 graph sau cấu hình CEGAR-957. & Thử component hoặc reachability cuts trong SAT; chưa được gán tám thắng lợi này cho một cơ chế cụ thể nếu chưa có trace. \\
 Picat & Có một unique win đã ghi nhận trên graph725. & Chưa đủ bằng chứng cơ chế; cần source và trace trước khi kết luận kỹ thuật nào tạo ra lợi ích. \\
 HCP hiện tại & Nhiều prepass, patcher và decomposition. & Giữ dưới dạng module có gate; không bật toàn bộ mặc định. \\
 \bottomrule
@@ -500,6 +507,11 @@ Ta gọi phương pháp là \textbf{Adaptive Hybrid SAT-HCP}, viết tắt \text
 \label{fig:architecture}
 \end{figure}
 
+\clearpage
+\begin{warningbox}[Trạng thái cài đặt]
+AHS v0 đã có driver cố định để chọn lộ trình từ đặc trưng graph, chia một ngân sách tổng cho CEGAR và HCup, dừng tiến trình con khi hết giờ, kiểm chứng tour độc lập và lưu manifest/raw log/summary. Đây là tích hợp ở mức tiến trình; hai backend chưa trao đổi cut hoặc SAT state. GraphCutPool, Phase B và CRE--CEGAR vẫn chưa được nối vào pipeline. Vì vậy sơ đồ trên tiếp tục là kiến trúc đích; phần đã cài đặt hiện nay là controller, Phase A/Phase C tuần tự và verifier.
+\end{warningbox}
+
 \section{Phase A: CEGAR có inprocessing}
 
 Phase A bắt đầu bằng cấu hình SAT-CEGAR mạnh nhất đã biết. CaDiCaL được phép dùng inprocessing để rút gọn công thức và cấu trúc tìm kiếm.
@@ -513,9 +525,11 @@ Mỗi cycle cover được xử lý theo thứ tự:
   \item ghi telemetry rồi gọi SAT tiếp.
 \end{enumerate}
 
+HCup \code{outside-mergecutset} áp dụng 2-opt exhaustively rồi mới sinh cut-set cho các component còn lại. Cấu hình CEGAR-957 dùng tùy chọn 2-opt riêng của code hiện tại. Hai cách này phải được báo cáo thành hai cấu hình khác nhau cho đến khi một ablation trực tiếp cho thấy có thể thay thế lẫn nhau.
+
 \section{Phase B: SAT-guided repair}
 
-Thay vì để patcher heuristic thử vô hạn, Phase B biến việc sửa cycle cover thành một bài toán SAT nhỏ hơn:
+Phase này chưa có trong code hiện tại. Đây là giả thuyết thay patcher heuristic bằng một bài toán SAT nhỏ hơn:
 
 \begin{itemize}
   \item giữ các cạnh ``tốt'' bằng assumptions;
@@ -524,16 +538,39 @@ Thay vì để patcher heuristic thử vô hạn, Phase B biến việc sửa cy
   \item nếu tìm được tour, kiểm chứng trực tiếp trên graph gốc.
 \end{itemize}
 
-Đây là một dạng large-neighborhood search nhưng lõi tìm kiếm vẫn là SAT.
+Đây là một dạng large-neighborhood search nhưng lõi tìm kiếm vẫn là SAT. Trước khi đưa vào controller, nó phải được ablate riêng trên bốn graph B2a và một tập đối chứng có cấu trúc tương tự.
 
 \section{Phase C: prevent-subcycle user propagation}
 
-User propagator theo dõi assignment chưa hoàn chỉnh. Nếu một cạnh sắp đóng một chu trình nhỏ trước khi chứa tất cả đỉnh, propagator có thể đẩy literal tương ứng về false và cung cấp lý do cho solver.
+User propagator theo dõi assignment chưa hoàn chỉnh. Nếu một cạnh sắp đóng một chu trình nhỏ trước khi chứa tất cả đỉnh, propagator có thể đẩy literal tương ứng về false và cung cấp lý do cho solver. Trong cấu hình HCup \code{hfp-preventsubcycle}, propagation này diễn ra trong quá trình CDCL, còn model hoàn chỉnh vẫn được refine ở stage \code{outside} bằng 2-opt và merge-cutset.
 
 \begin{intuitionbox}
 CEGAR thường đợi SAT solver dựng xong một cycle cover sai rồi mới sửa. User propagation giống như người giám sát phát hiện vòng nhỏ đang sắp khép lại và ngăn nó ngay trong lúc xây dựng.
 \end{intuitionbox}
 
+Con số 917/1001 của HFP chưa cho biết nó giải graph nào mà cấu hình CEGAR-957 bỏ sót. Phase C chỉ được coi là có tính bổ sung sau khi có log per-instance cùng điều kiện chạy.
+
+\section{Ứng viên encoding rebuild: CRE--CEGAR}
+
+Chinese Remainder Encoding (CRE) gắn cho mỗi đỉnh một ``đồng hồ vị trí'' theo nhiều mô-đun nhỏ. Nếu cạnh $u\to v$ được chọn, đồng hồ của $v$ phải tiến một bước so với $u$. Với tích mô-đun $M$, một subcycle không chứa đỉnh xuất phát chỉ có thể có độ dài chia hết cho $M$. Vì vậy CRE có thể loại nhiều vòng nhỏ ngay trong SAT, trước khi CEGAR nhìn thấy một model hoàn chỉnh.
+
+\begin{intuitionbox}[Trực giác về CRE]
+CEGAR dựng một cycle cover rồi mới cắt các vòng sai. Prevent-subcycle UP cố ngăn vòng sai khi nó sắp khép. CRE đặt thêm các đồng hồ modulo lên đỉnh, khiến nhiều vòng sai tự mâu thuẫn với phép ``cộng một'' của đồng hồ.
+\end{intuitionbox}
+
+CRE nên được thử như một \emph{SAT mode có CEGAR}, không phải một solver trả lời ngay sau model đầu tiên:
+
+\begin{enumerate}
+  \item giữ biến cạnh và degree constraints;
+  \item thêm các ràng buộc vị trí CRE với một $M$ đã chốt;
+  \item kiểm tra mọi model bằng tour verifier;
+  \item nếu model có nhiều cycle, sinh cut-set cho các component rồi gọi SAT tiếp;
+  \item khi rebuild với $M$ khác, import lại graph cuts đã học.
+\end{enumerate}
+
+Nếu $M<|V|$, CRE vẫn có thể trả về nhiều cycle. Model đó chỉ là một ứng viên để refine, không phải lời giải HCP. Log pilot cục bộ báo \code{VERIFIED} trên 18/18 graph với $M=420$, nhưng chưa chứng minh đây là ngưỡng tốt cho mọi graph và chưa có so sánh paired với CEGAR-957. Do đó CRE--CEGAR là ứng viên cho nhánh rebuild khi state bị hardening; chưa đưa vào pipeline mặc định.
+
+\clearpage
 \section{Vì sao cần rebuild giữa Phase A và Phase C?}
 
 Inprocessing có thể đổi, loại hoặc gộp biến nội bộ. User propagator lại cần ánh xạ ổn định giữa biến SAT và cạnh graph. Do đó hai lợi ích này không luôn tương thích trong cùng một state.
@@ -548,7 +585,7 @@ Giải pháp đề xuất:
   \item dùng cycle cover tốt nhất làm phase hint.
 \end{enumerate}
 
-Learned clause nội bộ không phải lúc nào chuyển được, nhưng cut-set ở mức graph thì chuyển được.
+Learned clause nội bộ không phải lúc nào chuyển được, nhưng cut-set ở mức graph thì chuyển được. CaDiCaL tự quản lý việc giảm learned-clause database; API ứng dụng không cho phép chọn và xóa tùy ý learned clause nội bộ. Export/import learned clause ngắn chỉ nên thử khi hai state dùng cùng ánh xạ biến, và phải là một ablation riêng.
 
 \chapter{Hybrid Controller quyết định như thế nào?}
 
@@ -563,6 +600,7 @@ Sau mỗi vòng CEGAR, controller ghi:
   \item thời gian SAT call gần nhất và tỷ lệ tăng;
   \item số cut-set, độ dài cut và số blocking clause;
   \item thời gian dành cho từng patcher;
+  \item SAT mode hiện tại; với CRE ghi thêm $M$, số biến/clause vị trí và số model nhiều cycle;
   \item graph density $m/n$, tỷ lệ đỉnh bậc 2, max degree và số hub.
 \end{itemize}
 
@@ -581,18 +619,38 @@ $m/n\geq 3$, nhiều hub & Dense graph; SAT branching và clause size có thể 
 Nhiều đỉnh bậc 2, merge progress bằng 0 & Cycle cover dễ rơi vào các vòng nhỏ cưỡng bức. & Chuyển sang prevent-subcycle UP hoặc connectivity cuts mạnh hơn. \\
 Ít subcycle lớn, patcher liên tục giảm cycle count & Lời giải đang gần một tour. & Cho repair thêm ngân sách; chưa rebuild solver. \\
 Nhiều subcycle nhỏ lặp lại & Patcher có thể quay lại cùng attractor. & Giảm patching, thêm cut sớm và đa dạng phase. \\
-SAT call cuối chiếm phần lớn runtime & State có dấu hiệu hardening. & Export cut pool rồi rebuild với encoding/phase khác. \\
+SAT call cuối chiếm phần lớn runtime & State có dấu hiệu hardening. & Export cut pool rồi rebuild với UP hoặc một encoding khác như CRE--CEGAR. \\
 \bottomrule
 \end{tabularx}
 \caption{Các luật controller ban đầu. Ngưỡng cụ thể phải được chọn trên training set.}
 \end{table}
+
+Các lớp A/B1/B2a/B2b mô tả động lực của một lần chạy, không phải nhãn bất biến của graph. Bảng sau chỉ là bản đồ giả thuyết để chọn thí nghiệm:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{>{\bfseries\sffamily}p{15mm} p{31mm} X X}
+\toprule
+Lớp & Trạng thái & Cơ chế nên thử & Mức bằng chứng \\
+\midrule
+A & Đã giải 8/8 & Giữ CEGAR hiện tại và kiểm tra regression. & Cao. \\
+B1 & Còn 6 core & Inprocessing, merge-cutset, encoding và decomposition. & Trung bình; UP có thể mất lợi ích inprocessing nên phải đo. \\
+B2a & Còn 3 core & SAT-guided repair, prevent-subcycle, path-cover hoặc decomposition. & Thấp; chưa có run trực tiếp. \\
+B2b & Còn 24 core & Prevent-subcycle, CRE--CEGAR, rebuild có cut transfer và đổi encoding/variable order. & Thấp đến trung bình; mới có telemetry, chưa có run CRE trên core. \\
+\bottomrule
+\end{tabularx}
+\caption{Mapping giả thuyết từ failure class sang thí nghiệm.}
+\end{table}
+
+Không đặt ngưỡng từ trực giác rồi báo trên cùng tập dữ liệu. Mỗi ngưỡng phải được chọn trên training split theo họ cấu trúc, khóa lại và sau đó mới chạy test split.
 
 \section{Phân bổ ngân sách}
 
 Không nên cho mỗi backend 1800 giây rồi cộng kết quả, vì như vậy phương pháp hybrid được hưởng nhiều tài nguyên hơn baseline. Một cách công bằng là:
 
 \[
-  T_{\mathrm{preprocess}}+T_A+T_B+T_C \leq 1800\text{ giây}.
+  T_{\mathrm{preprocess}}+T_A+T_B+T_C+T_{\mathrm{CRE}} \leq 1800\text{ giây}.
 \]
 
 Controller có thể chuyển phase theo sự kiện thay vì một mốc thời gian cứng. Ví dụ, Phase A tiếp tục khi vẫn tạo tiến bộ; nó chuyển sớm nếu nhiều vòng liên tiếp không cải thiện và SAT call tăng nhanh.
@@ -615,6 +673,50 @@ Không nhất thiết mọi đỉnh phải dùng cùng một cardinality encodin
 
 Đây là một công thức SAT duy nhất nhưng được thiết kế theo cấu trúc cục bộ của graph.
 
+\section{Bốn đề xuất từ nhánh SAT encoding}
+
+Tài liệu NHCP nêu bốn cách tăng cường CRE. Không nên bật cả bốn cùng lúc. Trạng thái phù hợp của từng cách là:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{p{31mm} p{30mm} X}
+\toprule
+Đề xuất & Quyết định & Lý do \\
+\midrule
+Symmetry breaking tại đỉnh xuất phát & Giữ và ablate & Đã có trong CRE gốc, nên không tính là cải tiến mới. Chỉ an toàn cho graph vô hướng hoặc digraph có đối xứng đảo chiều. \\
+Chọn đỉnh xuất phát bậc nhỏ nhất & Giữ như một policy & Phá đối xứng quay và có thể tăng propagation, nhưng lợi ích của tiêu chí bậc nhỏ nhất chưa được đo riêng. \\
+Preprocessing theo khoảng cách & Sửa trước khi dùng & Khoảng tuyệt đối chỉ an toàn khi vị trí được mã hóa duy nhất. Với CRE modulo, phải lọc residue theo tập khả dĩ. \\
+PBLib cho ExactlyOne & Ablation, không mặc định & PBLib chỉ là bộ sinh encoding. Cần so clause, biến phụ, propagation, runtime và chi phí dependency với pairwise/Sinz/commander hiện có. \\
+\bottomrule
+\end{tabularx}
+\caption{Cách tiếp nhận bốn đề xuất từ nhánh SAT encoding.}
+\end{table}
+
+\subsection{Preprocessing khoảng cách an toàn cho CRE}
+
+Gọi $d_s(v)$ là khoảng cách ngắn nhất từ đỉnh xuất phát $s$ đến $v$, và $d_v(s)$ là khoảng cách từ $v$ về $s$. Vị trí thật của $v$ trong một tour phải thuộc
+
+\[
+  L_v=d_s(v)+1,
+  \qquad
+  U_v=|V|-d_v(s)+1.
+\]
+
+Với một phân đoạn modulo $q$, chỉ được cấm residue không xuất hiện trong khoảng này:
+
+\[
+  R_v^{(q)}=\{t\bmod q\mid L_v\leq t\leq U_v\}.
+\]
+
+Ta thêm clause cấm $\operatorname{pos}_q(v)=r$ chỉ khi $r\notin R_v^{(q)}$. Cách này có thể yếu hơn cắt khoảng tuyệt đối nhưng giữ tính đúng. Ngược lại, nếu $M<|V|$, cấm trực tiếp một giá trị $t$ nằm ngoài khoảng có thể sai vì $t$ và $t+M$ có cùng residue. Ví dụ, với $M=3$, cấm vị trí 1 cũng vô tình cấm vị trí 4.
+
+Với full binary position, cắt khoảng trực tiếp chỉ an toàn khi miền vị trí không lặp và $M\geq |V|$. Khi đó có thể dùng ràng buộc khoảng đơn điệu của BinaryAdder. Với graph có hướng, symmetry đảo chiều phải tắt và hai khoảng cách phải được tính đúng chiều.
+
+\subsection{ExactlyOne: dùng policy thay vì khóa vào PBLib}
+
+AtLeastOne chỉ cần một clause chứa các cạnh thật sự kề đỉnh. Phần AtMostOne nên được chọn theo bậc: pairwise cho bậc nhỏ, rồi so Sinz, commander, cardinality network hoặc PBLib trên bậc lớn. Prototype có \code{EOPbLib.exactly\_one()}, nhưng \code{at\_most\_one()} vẫn là stub; CRE độc lập vẫn dùng AtMostOne tự viết. Chưa có thí nghiệm chứng minh PBLib thắng trên full 1001.
+
 \section{GraphCutPool độc lập encoding}
 
 Mỗi cut được lưu ở dạng cấu trúc:
@@ -635,9 +737,11 @@ Khi tạo SAT state mới:
   \item giảm dần độ tin cậy sau mỗi lần thất bại để tránh khóa vào attractor.
 \end{itemize}
 
+Phase hint chỉ đổi giá trị solver ưu tiên thử trước; nó không bắt buộc cạnh phải được chọn. Ngược lại, assumption là ràng buộc tạm thời nhưng bắt buộc trong một lần gọi SAT. Không nên đưa toàn bộ cycle cover vào assumptions vì điều đó gần như khóa solver vào lời giải cũ. Nếu thử assumptions trên một tập cạnh nhỏ, khi UNSAT phải bỏ hoặc nới tập này rồi tiếp tục.
+
 \section{Tổng quát hóa cut theo xung đột}
 
-Nếu nhiều cycle cover khác nhau liên tục tạo cùng một phân hoạch component, ta có thể tổng quát hóa các blocking clause riêng lẻ thành một connectivity cut mạnh hơn. Đây là nơi có thể hấp thụ trực giác về nogood toàn cục từ ASP mà vẫn giữ backend SAT.
+Nếu nhiều cycle cover khác nhau liên tục tạo cùng một phân hoạch component, ta có thể tổng quát hóa các blocking clause riêng lẻ thành một connectivity cut mạnh hơn. ASP bổ sung 8 graph trong thứ tự portfolio hiện tại, nhưng log chưa chứng minh kỹ thuật nào tạo ra các thắng lợi đó. Vì vậy connectivity cut là một giả thuyết SAT cần ablation, không phải cơ chế đã xác nhận từ ASP.
 
 \section{Học controller bằng dữ liệu}
 
@@ -651,7 +755,7 @@ Sau khi có log đầy đủ, một mô hình nhỏ có thể dự đoán:
   \item cách chia ngân sách.
 \end{itemize}
 
-Tuy nhiên, 1001 instance là tập dữ liệu nhỏ và chứa nhiều graph cùng họ. Phải chia train/test theo \emph{họ cấu trúc}, không chia ngẫu nhiên từng graph. Nếu graph950 được train còn graph963 gần như cùng cấu trúc nằm trong test, kết quả có thể bị leakage.
+Tuy nhiên, 1001 instance là tập dữ liệu nhỏ và chứa nhiều graph cùng họ. Các lớp hiếm còn nhỏ hơn: Class A có 8 mẫu và B2a có 4 mẫu trong baseline timeout. Một increment đầu tiên cũng chưa đủ để nhận ra các động lực được định nghĩa qua nhiều increment. Phải chia train/test theo \emph{họ cấu trúc}, không chia ngẫu nhiên từng graph. Nếu graph950 được train còn graph963 gần như cùng cấu trúc nằm trong test, kết quả có thể bị leakage.
 
 \chapter{Thiết kế thực nghiệm công bằng}
 
@@ -663,6 +767,8 @@ Tuy nhiên, 1001 instance là tập dữ liệu nhỏ và chứa nhiều graph c
   \item[RQ3.] Prevent-subcycle UP có bổ sung cho CEGAR inprocessing trên core-33 không?
   \item[RQ4.] SAT-guided repair có thắng 2-opt/3-opt thuần trên nhóm merge stall không?
   \item[RQ5.] Encoding lai theo đỉnh có giảm runtime mà không gây regression trên easy set không?
+  \item[RQ6.] Trên B2b, rebuild giữ graph cuts có giảm hardening đủ để bù chi phí mất learned clauses không?
+  \item[RQ7.] CRE--CEGAR có tạo unique win so với CEGAR-957, và cải tiến nào trong symmetry, start policy, distance filtering hoặc AMO policy tạo ra lợi ích đó?
 \end{description}
 
 \section{Ba mức kết quả phải báo cáo riêng}
@@ -678,10 +784,11 @@ Tuy nhiên, 1001 instance là tập dữ liệu nhỏ và chứa nhiều graph c
 Ngoài full set 1001 graph, cần theo dõi:
 
 \begin{itemize}
-  \item \textbf{Core-33:} chưa được 21 phương pháp có log đầy đủ giải.
+  \item \textbf{Core-33:} chưa được 21 phương pháp có log per-instance đầy đủ giải; trạng thái trong HCup hiện chưa biết.
   \item \textbf{SAT-only open-38:} core-33 cộng graph677, graph725, graph744, graph810 và graph940, vốn đang được ASP/Picat bổ sung.
-  \item \textbf{Easy-overhead set:} kiểm tra phương pháp thích nghi không làm graph dễ chậm đi quá nhiều.
-  \item \textbf{Các họ cấu trúc:} dense B1, merge-stall B2a, long-call B2b và attractor A.
+  \item \textbf{CRE pilot:} 18 graph legacy chỉ dùng để kiểm tra tương thích và tái lập; kết luận coverage phải dựa trên core-33, 44 miss của CEGAR-957 và full 1001.
+  \item \textbf{Easy-overhead set:} phải được định nghĩa và khóa trước benchmark. Tập \code{10-300-10} hiện chỉ là pilot 30 graph, không đại diện cho toàn bộ graph dễ.
+  \item \textbf{Các họ cấu trúc:} dense B1, merge-stall B2a, long-call B2b và attractor A. Đây là failure dynamics của run baseline; không mặc định là nhãn bất biến của graph.
 \end{itemize}
 
 \section{Chỉ số đánh giá}
@@ -699,6 +806,10 @@ Phase overhead & Thời gian controller, rebuild, encoding, patching và verific
 \bottomrule
 \end{tabularx}
 
+Solved count và PAR-2 là hai chỉ số chính. Với kết quả paired trên cùng instance, chênh lệch solved/timeout có thể kiểm tra bằng exact McNemar. PAR-2 nên kèm paired bootstrap hoặc permutation interval. Paired Wilcoxon chỉ dùng như phân tích phụ trên các graph mà cả hai cấu hình đều giải; nếu chỉ nhìn runtime của phần solved, kết quả sẽ thiên lệch vì bỏ qua timeout. Có thể bổ sung survival analysis để xử lý runtime bị censor tại cap.
+
+Easy-overhead phải báo median, p90 và số graph chậm hơn các ngưỡng 5\%, 10\% và 25\%. Không dùng một con số như ``944 easy graph'' nếu chưa có tiêu chí tạo tập và danh sách cố định.
+
 \section{Ablation bắt buộc}
 
 \begin{table}[H]
@@ -710,12 +821,36 @@ Cấu hình & Cut pool & Repair SAT & UP & Controller \\
 CEGAR base & \no & \no & \no & \no \\
 + cut transfer & \yes & \no & \no & \no \\
 + SAT-guided repair & \yes & \yes & \no & \no \\
-+ user propagation & \yes & \yes & \yes & \no \\
++ user propagation & \yes & \no & \yes & \no \\
++ repair + user propagation & \yes & \yes & \yes & \no \\
 AHS-HCP đầy đủ & \yes & \yes & \yes & \yes \\
 \bottomrule
 \end{tabularx}
 \caption{Ablation giúp xác định module nào thực sự tạo lợi ích.}
 \end{table}
+
+\clearpage
+CRE cần một ablation riêng, luôn giữ cùng solver, seed, cap và $M$ khi so các dòng:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{p{31mm} X}
+\toprule
+Cấu hình & Thành phần được bật \\
+\midrule
+CRE--CEGAR base & Một start vertex cố định, không symmetry đảo chiều, không distance filtering, AMO hiện tại. \\
+CRE-start & Base + chọn start vertex bậc nhỏ nhất. \\
+CRE-sym & Base + symmetry đảo chiều; chỉ chạy trên graph vô hướng. \\
+CRE-distance & Base + residue filtering theo khoảng cách an toàn. \\
+CRE-AMO & Base + policy chọn AMO theo bậc hoặc PBLib. \\
+CRE-full & Start policy + symmetry an toàn + distance filtering + AMO policy. \\
+\bottomrule
+\end{tabularx}
+\caption{Ablation riêng cho nhánh CRE--CEGAR.}
+\end{table}
+
+Ảnh hưởng của $M$ phải được đo trong một thí nghiệm khác. Có thể thử các mốc pilot $12,60,105,420$ và một $M_{\mathrm{exact}}>|V|$, nhưng lịch chuyển $M$ phải được khóa trước test và dùng chung một ngân sách. Không lấy giá trị tốt nhất sau khi nhìn kết quả rồi gọi đó là một solver đơn.
 
 \begin{resultbox}[Tiêu chuẩn để tuyên bố cải tiến]
 Phương pháp mới phải được chạy như một cấu hình đã chốt, trên cùng máy, cùng giới hạn CPU/RAM, cùng verifier và cùng cách tính timeout. Không so runtime trực tiếp giữa các CSV được đo trên phần cứng khác nhau.
@@ -726,9 +861,11 @@ Phương pháp mới phải được chạy như một cấu hình đã chốt, 
 \section{Giai đoạn 0: hoàn thiện bằng chứng}
 
 \begin{enumerate}
-  \item Chạy hai cấu hình HCup mạnh nhất trên core-33.
-  \item Import JSONL vào bảng coverage động.
-  \item Xác định graph nào HCup bổ sung cho SAT-CEGAR.
+  \item Trên core-33, chạy hai cấu hình HCup mạnh nhất để tìm coverage mới ngoài union 968. Hai cấu hình là \code{outside-mergecutset} và \code{hfp-preventsubcycle}.
+  \item Chạy \code{hfp-preventsubcycle} trên 44 timeout của cấu hình CEGAR-957 để đo marginal gain của Phase C.
+  \item Chạy pilot CRE hiện có trên core-33 và 44 timeout nói trên. Báo riêng \code{VERIFIED}, \code{MULTICYCLE}, \code{UNSAT} và \code{TIMEOUT}; không tính model nhiều cycle là solved.
+  \item Import JSONL vào bảng coverage động và kiểm chứng mọi tour.
+  \item Nếu có tín hiệu dương, chạy full 1001 cùng máy để đo overlap, regression và overhead.
   \item Thu telemetry thống nhất cho CEGAR và HCup.
 \end{enumerate}
 
@@ -743,36 +880,49 @@ Phương pháp mới phải được chạy như một cấu hình đã chốt, 
   \item bảo đảm mọi cut đều sound bằng unit test trên graph nhỏ.
 \end{itemize}
 
-\section{Giai đoạn 2: Hybrid Controller luật}
+\section{Giai đoạn 2: làm đúng và ablate CRE--CEGAR}
 
-Controller ban đầu chỉ cần một state machine nhỏ:
+Prototype CRE đã có nên có thể kiểm tra trước khi port sâu:
 
 \begin{enumerate}
-  \item \code{FAST\_CEGAR};
-  \item \code{SAT\_REPAIR};
-  \item \code{UP\_REBUILD};
-  \item \code{FINAL\_FALLBACK};
-  \item \code{SOLVED} hoặc \code{TIMEOUT}.
+  \item thêm vòng verify--cut--solve để model nhiều cycle được refine thay vì kết thúc;
+  \item chỉ dùng preprocessing khoảng cách theo residue; tắt symmetry đảo chiều trên graph có hướng;
+  \item kiểm tra exhaustive trên graph nhỏ bằng cách so với brute force, cả khi từng cải tiến bật và tắt;
+  \item chạy bảng ablation CRE trên pilot, core-33, 44 miss và một easy-control set;
+  \item chỉ đưa CRE vào controller nếu có unique win hoặc giảm PAR-2 ổn định sau khi tính cả thời gian sinh CNF và rebuild.
 \end{enumerate}
 
-Mọi chuyển state phải ghi event, lý do, thời gian còn lại và snapshot telemetry.
+\section{Giai đoạn 3: prototype và ablate Phase B}
 
-\section{Giai đoạn 3: tích hợp kỹ thuật HCup}
+Xây SAT-guided repair như một module độc lập trước khi nối vào pipeline:
+
+\begin{enumerate}
+  \item chạy trên bốn B2a: graph479, graph809, graph868 và graph960;
+  \item tạo tập đối chứng có mật độ cạnh và tỷ lệ đỉnh bậc 2 tương tự;
+  \item so với 2-opt/3-opt thuần dưới cùng ngân sách;
+  \item chỉ giữ module nếu nó tạo marginal gain hoặc giảm PAR-2 ổn định.
+\end{enumerate}
+
+\section{Giai đoạn 4: driver A--C và tích hợp HCup}
 
 Có hai mức tích hợp:
 
 \begin{description}
-  \item[Mức thực nghiệm nhanh.] Một driver cố định điều phối hai binary và dùng chung file cut/cycle-cover. Dễ kiểm chứng ý tưởng nhưng vẫn có overhead process.
+  \item[Mức thực nghiệm nhanh.] AHS v0 đã có driver cố định điều phối hai binary trong một ngân sách tổng và kiểm chứng tour. Bước kế tiếp của mức này là bổ sung file cut/cycle-cover chung sau khi hai CLI có giao diện export/import tương thích.
   \item[Mức phương pháp hoàn chỉnh.] Port prevent-subcycle hoặc đóng gói HCup thành library có API ổn định. Khi đó controller, cut pool và verifier nằm trong một executable.
 \end{description}
 
 Nên chứng minh tính bổ sung ở mức driver trước, rồi mới trả chi phí port sâu.
 
-\section{Giai đoạn 4: cải tiến mới và học selector}
+\section{Giai đoạn 5: controller luật, rồi mới học selector}
 
-Chỉ sau khi controller luật ổn định mới thử encoding lai, SAT-guided LNS và model học. Mỗi ý tưởng cần một ablation riêng; nếu gộp nhiều thay đổi cùng lúc, ta không biết nguyên nhân của thắng hoặc thua.
+Khi CRE, Phase B và driver A--C đã có số liệu, controller ban đầu chỉ cần các state \code{FAST\_CEGAR}, \code{CRE\_REBUILD}, \code{SAT\_REPAIR}, \code{UP\_REBUILD}, \code{FINAL\_FALLBACK}, \code{SOLVED} và \code{TIMEOUT}. Mọi chuyển state phải ghi lý do, thời gian còn lại và snapshot telemetry.
+
+Chỉ sau khi controller luật ổn định mới thử encoding lai và model học. Mỗi ý tưởng cần một ablation riêng; nếu gộp nhiều thay đổi cùng lúc, ta không biết nguyên nhân của thắng hoặc thua.
 
 \chapter{Pseudocode dễ đọc}
+
+Pseudocode dưới đây mô tả hệ đích sau khi các phase đã được cài đặt và vượt qua ablation. Nó không phải mô tả của binary hiện tại.
 
 \begin{tcolorbox}[breakable,colback=paper,colframe=navy,title={\sffamily\bfseries Thuật toán AHS-HCP},fontupper=\ttfamily\small]
 INPUT: graph G, total budget T\\
@@ -791,7 +941,7 @@ OUTPUT: verified Hamiltonian cycle, or UNKNOWN\\[1mm]
 \hspace*{5mm}f. update telemetry\\
 \hspace*{5mm}g. if Controller requests a phase change:\\
 \hspace*{10mm}- export graph cuts and best cycle cover\\
-\hspace*{10mm}- rebuild the selected SAT mode\\
+\hspace*{10mm}- rebuild the selected SAT mode (CEGAR, CRE--CEGAR or UP)\\
 \hspace*{10mm}- import cuts and phase hints\\
 6. return UNKNOWN
 \end{tcolorbox}
