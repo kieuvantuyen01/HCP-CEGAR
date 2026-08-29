@@ -10,7 +10,8 @@
 - **`docs/`**: Comprehensive technical architecture documentation, benchmark analyses, and experimental reports:
   - [`docs/rust_solver_architecture_and_methods.md`](docs/rust_solver_architecture_and_methods.md): Full technical breakdown of all algorithms and CLI flags in the Rust codebase (`cegar-fix`).
   - [`docs/graph950_methods_and_experiments_report.md`](docs/graph950_methods_and_experiments_report.md): Deep-dive research report on methods attempted on `graph950.col`.
-  - [`docs/timeout-classification-analysis.md`](docs/timeout-classification-analysis.md): Systematic categorization of timeout dynamics across 1,001 FHCP benchmark instances.
+- [`docs/timeout-classification-analysis.md`](docs/timeout-classification-analysis.md): Systematic categorization of timeout dynamics across 1,001 FHCP benchmark instances.
+- [`docs/hybrid-coverage.md`](docs/hybrid-coverage.md): Per-instance CSV inventory, exact portfolio coverage, HCup integration, and a resumable 1–2 day run plan for the 33 remaining instances.
 - **`logs/`**: Consolidated experimental logs, runtime data CSVs, and sample JSONs across the 1,001 FHCPCS benchmark graphs.
 - **`scratch/`**: Prototyping scripts, two-tier decomposition experiments, and verification tools.
 

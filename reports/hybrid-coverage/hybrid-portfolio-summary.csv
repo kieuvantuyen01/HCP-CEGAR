@@ -1,0 +1,6 @@
+stage,method_id,display_name,standalone_solved,new_solved_at_stage,cumulative_solved,cumulative_coverage_pct,new_graphs,interpretation
+1,ccad_2loop_asym3_2opt3,proposed-cegar-ffi-2loop-lowest-asymmetry3-2opt3-cadical,957,957,957,0.956044,,real configuration in a static fallback portfolio
+2,ref_asp,asp,942,8,965,0.964036,graph357 graph651 graph677 graph734 graph744 graph810 graph910 graph940,real configuration in a static fallback portfolio
+3,sinz_2loop,asp2-fix-2loop-cadical-sinz,884,2,967,0.966034,graph479 graph678,real configuration in a static fallback portfolio
+4,ref_picat,picat,428,1,968,0.967033,graph725,real configuration in a static fallback portfolio
+OPEN,,Unsolved by all 21 recorded paper/reference methods,,,968,0.967033,graph668 graph710 graph717 graph746 graph761 graph788 graph809 graph832 graph868 graph882 graph937 graph944 graph950 graph951 graph954 graph959 graph960 graph963 graph965 graph966 graph971 graph974 graph975 graph976 graph981 graph982 graph983 graph986 graph987 graph990 graph993 graph994 graph998,research target; HCup per-instance results still missing

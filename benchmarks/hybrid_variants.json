@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "graph_dir": "FHCPCS-col",
+  "timeout_sec": 1800,
+  "expected_status": "SATISFIABLE",
+  "default_variants": [
+    "hcup_outside_mergecutset",
+    "hcup_hfp_preventsubcycle"
+  ],
+  "variants": [
+    {
+      "name": "hcup_outside_mergecutset",
+      "source_dir": "../hcup",
+      "binary": "../hcup/cmake-build-release/hcup",
+      "build_system": "cmake",
+      "cmake_build_dir": "cmake-build-release",
+      "cmake_target": "hcup",
+      "status_protocol": "hcup",
+      "sat_solver": "CaDiCaL with IPASIR-UP",
+      "arguments": [
+        "-b",
+        "merge-cutset",
+        "-s",
+        "outside",
+        "-o",
+        "vertices"
+      ]
+    },
+    {
+      "name": "hcup_hfp_preventsubcycle",
+      "extends": "hcup_outside_mergecutset",
+      "arguments": [
+        "-b",
+        "merge-cutset",
+        "-s",
+        "outside",
+        "-p",
+        "prevent-subcycle",
+        "-o",
+        "vertices"
+      ]
+    },
+    {
+      "name": "hcup_outside_mergecutset_plain",
+      "extends": "hcup_outside_mergecutset",
+      "arguments": [
+        "-b",
+        "merge-cutset",
+        "-s",
+        "outside",
+        "-o",
+        "vertices",
+        "--cadical",
+        "plain"
+      ]
+    },
+    {
+      "name": "paper_ccad_best_replay",
+      "source_dir": "src/cegar-ffi",
+      "binary": "src/cegar-ffi/target/release/cegar-ffi",
+      "options": {
+        "-b": "3",
+        "-y": "3",
+        "-t": "3",
+        "-l": "1"
+      }
+    },
+    {
+      "name": "paper_sinz_2loop_replay",
+      "source_dir": "src/cegar-fix",
+      "binary": "src/cegar-fix/target/release/cegar-fix",
+      "supports_output_tour": true,
+      "supports_internal_timeout": true,
+      "options": {
+        "-e": "1",
+        "-b": "3",
+        "-y": "0",
+        "-t": "3",
+        "-l": "1",
+        "--three-opt": "0",
+        "--cegar-fallback": "0",
+        "--mtz-stall": "0",
+        "--adaptive-escalation": "0",
+        "--degree2-triangle-prune": "0",
+        "--degree2-contraction": "0",
+        "--global-short-cuts": "0",
+        "--short-cycle-sec": "0",
+        "--cluster-cuts": "0",
+        "--modular-prepass": "0",
+        "--hub-partition-prepass": "0",
+        "--hub-patcher": "0",
+        "--matching-patcher": "0",
+        "--chained-lk": "0",
+        "--ils-patcher": "0",
+        "--macro-patcher": "0",
+        "--telemetry": "1"
+      }
+    },
+    {
+      "name": "current_full",
+      "extends": "paper_sinz_2loop_replay",
+      "options": {
+        "-e": "1",
+        "-b": "3",
+        "-y": "0",
+        "-t": "3",
+        "-l": "1",
+        "--three-opt": "1",
+        "--cegar-fallback": "1",
+        "--mtz-stall": "6",
+        "--adaptive-escalation": "1",
+        "--degree2-triangle-prune": "1",
+        "--degree2-contraction": "1",
+        "--global-short-cuts": "1",
+        "--short-cycle-sec": "1",
+        "--cluster-cuts": "1",
+        "--modular-prepass": "1",
+        "--hub-partition-prepass": "1",
+        "--hub-patcher": "1",
+        "--matching-patcher": "1",
+        "--chained-lk": "1",
+        "--ils-patcher": "1",
+        "--macro-patcher": "1",
+        "--telemetry": "1"
+      }
+    }
+  ]
+}

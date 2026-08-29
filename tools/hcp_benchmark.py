@@ -248,7 +248,8 @@ def parse_tour_file(path: Path) -> list[int] | None:
 def parse_tour_stdout(stdout: str) -> list[int] | None:
     lines = stdout.splitlines()
     for index in range(len(lines) - 1, -1, -1):
-        if lines[index].strip().lower().startswith("solution:"):
+        marker = lines[index].strip().lower()
+        if marker.startswith("solution:") or marker.startswith("model:"):
             suffix = lines[index].split(":", 1)[1].strip()
             if suffix and INTEGER_LINE_RE.fullmatch(suffix):
                 return [int(value) for value in suffix.split()]
@@ -277,7 +278,20 @@ def verify_tour(
     return True, "verified"
 
 
-def parse_status(stdout: str) -> str:
+def parse_status(stdout: str, protocol: str = "dimacs") -> str:
+    if protocol == "hcup":
+        statuses = []
+        for line in stdout.splitlines():
+            value = line.strip()
+            if value == "SAT":
+                statuses.append("SATISFIABLE")
+            elif value.startswith("UNSAT"):
+                statuses.append("UNSATISFIABLE")
+            elif value == "INTERRUPTED" or value.startswith("Interrupt signal"):
+                statuses.append("UNKNOWN")
+        return statuses[-1] if statuses else "NO_STATUS"
+    if protocol != "dimacs":
+        raise ValueError(f"unknown status protocol: {protocol}")
     statuses = []
     for line in stdout.splitlines():
         match = STATUS_RE.match(line.strip())
@@ -402,7 +416,10 @@ def build_variant(
     variant: dict[str, Any], env: dict[str, str], output_dir: Path
 ) -> Path:
     source_dir = (ROOT / variant["source_dir"]).resolve()
+    build_system = variant.get("build_system", "cargo")
     if variant.get("isolated_build", False):
+        if build_system != "cargo":
+            raise ValueError("isolated_build is currently supported only for Cargo variants")
         isolated_source = output_dir / "build-sources" / safe_name(variant["name"])
         if isolated_source.exists():
             shutil.rmtree(isolated_source)
@@ -412,30 +429,66 @@ def build_variant(
             ignore=shutil.ignore_patterns("target", ".git", "*.log", "*.cnf"),
         )
         source_dir = isolated_source
-    command = ["cargo", "build", "--release", *variant.get("build_args", [])]
-    print(f"[build] {variant['name']}: {' '.join(command)} ({source_dir})", flush=True)
-    result = subprocess.run(command, cwd=source_dir, env=env)
-    if result.returncode != 0:
-        raise RuntimeError(f"build failed for variant {variant['name']}")
-    binary_name = Path(variant["binary"]).name
-    return source_dir / "target" / "release" / binary_name
+    if build_system == "cargo":
+        command = ["cargo", "build", "--release", *variant.get("build_args", [])]
+        print(f"[build] {variant['name']}: {' '.join(command)} ({source_dir})", flush=True)
+        result = subprocess.run(command, cwd=source_dir, env=env)
+        if result.returncode != 0:
+            raise RuntimeError(f"build failed for variant {variant['name']}")
+        binary_name = Path(variant["binary"]).name
+        return source_dir / "target" / "release" / binary_name
+    if build_system == "cmake":
+        build_dir = source_dir / variant.get("cmake_build_dir", "cmake-build-release")
+        configure = [
+            "cmake",
+            "-S",
+            str(source_dir),
+            "-B",
+            str(build_dir),
+            "-DCMAKE_BUILD_TYPE=Release",
+            *variant.get("configure_args", []),
+        ]
+        build = [
+            "cmake",
+            "--build",
+            str(build_dir),
+            "--target",
+            variant.get("cmake_target", Path(variant["binary"]).name),
+            "-j",
+            str(variant.get("build_jobs", os.cpu_count() or 2)),
+            *variant.get("build_args", []),
+        ]
+        for command in (configure, build):
+            print(f"[build] {variant['name']}: {' '.join(command)}", flush=True)
+            result = subprocess.run(command, cwd=source_dir, env=env)
+            if result.returncode != 0:
+                raise RuntimeError(f"build failed for variant {variant['name']}")
+        return build_dir / Path(variant["binary"]).name
+    raise ValueError(f"unknown build_system {build_system!r} for {variant['name']}")
 
 
 def safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
 
 
-def load_completed(path: Path) -> set[tuple[str, int, int]]:
+def load_completed(
+    path: Path,
+) -> tuple[set[tuple[str, int, int]], set[tuple[int, int]]]:
     completed: set[tuple[str, int, int]] = set()
+    solved: set[tuple[int, int]] = set()
     if not path.is_file():
-        return completed
+        return completed, solved
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             row = json.loads(line)
-            completed.add((row["variant"], int(row["graph_number"]), int(row.get("repetition", 1))))
+            graph_number = int(row["graph_number"])
+            repetition = int(row.get("repetition", 1))
+            completed.add((row["variant"], graph_number, repetition))
+            if row.get("status") == "SATISFIABLE" and row.get("verified") is True:
+                solved.add((graph_number, repetition))
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             continue
-    return completed
+    return completed, solved
 
 
 def main() -> int:
@@ -449,10 +502,17 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--stop-on-solved",
+        action="store_true",
+        help="Treat selected variants as an ordered portfolio and skip later variants after a verified solution.",
+    )
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--shuffle", action="store_true")
     parser.add_argument("--random-seed", type=int, default=20260824)
     args = parser.parse_args()
+    if args.stop_on_solved and args.shuffle:
+        raise ValueError("--stop-on-solved requires deterministic variant order; do not use --shuffle")
 
     config_path = args.config.resolve()
     config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -497,8 +557,11 @@ def main() -> int:
 
     actual_binaries: dict[str, Path] = {}
     if not args.no_build:
-        if shutil.which("cargo") is None:
+        build_systems = {variant.get("build_system", "cargo") for variant in selected}
+        if "cargo" in build_systems and shutil.which("cargo") is None:
             raise RuntimeError("cargo not found; install Rust or use --no-build with prebuilt binaries")
+        if "cmake" in build_systems and shutil.which("cmake") is None:
+            raise RuntimeError("cmake not found; install CMake or use --no-build with prebuilt binaries")
         built_sources: dict[tuple[str, bool], Path] = {}
         for variant in selected:
             source = str((ROOT / variant["source_dir"]).resolve())
@@ -518,17 +581,22 @@ def main() -> int:
             raise FileNotFoundError(f"binary for {variant['name']} not found: {binary}")
         if not os.access(binary, os.X_OK):
             raise PermissionError(f"binary is not executable: {binary}")
-        build_source = binary.parents[2]
+        build_source = (ROOT / variant["source_dir"]).resolve()
         lockfile = build_source / "Cargo.lock"
+        build_system = variant.get("build_system", "cargo")
         binary_metadata[variant["name"]] = {
             "path": str(binary),
             "sha256": sha256_file(binary),
+            "build_system": build_system,
             "cargo_lock": str(lockfile) if lockfile.is_file() else None,
             "cargo_lock_sha256": sha256_file(lockfile),
             "packages": cargo_lock_versions(
                 lockfile, ("rustsat", "rustsat-cadical")
             ),
-            "sat_solver": "CaDiCaL via rustsat-cadical",
+            "sat_solver": variant.get(
+                "sat_solver",
+                "CaDiCaL via rustsat-cadical" if build_system == "cargo" else "CaDiCaL",
+            ),
             "solver_seed": variant.get("solver_seed", "library default; CLI does not expose a seed"),
         }
         source = (ROOT / variant["source_dir"]).resolve()
@@ -551,6 +619,7 @@ def main() -> int:
             "python": sys.version,
             "rustc": command_version(["rustc", "--version"]),
             "cargo": command_version(["cargo", "--version"]),
+            "cmake": command_version(["cmake", "--version"]),
         },
         "controlled_environment": controlled_env,
         "strict_external_timeout": True,
@@ -560,6 +629,7 @@ def main() -> int:
         "repetitions": args.repetitions,
         "shuffle": args.shuffle,
         "random_seed": args.random_seed,
+        "stop_on_solved": args.stop_on_solved,
         "variants": selected,
         "binaries": binary_metadata,
         "sources": source_metadata,
@@ -568,7 +638,9 @@ def main() -> int:
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
 
-    completed = load_completed(results_path) if args.resume else set()
+    completed, solved_graph_repetitions = (
+        load_completed(results_path) if args.resume else (set(), set())
+    )
     tasks = [
         (graph_number, variant, repetition)
         for repetition in range(1, args.repetitions + 1)
@@ -587,6 +659,13 @@ def main() -> int:
             if key in completed:
                 print(f"[{task_index}/{total}] skip completed {key}", flush=True)
                 continue
+            graph_repetition = (graph_number, repetition)
+            if args.stop_on_solved and graph_repetition in solved_graph_repetitions:
+                print(
+                    f"[{task_index}/{total}] skip portfolio-solved graph{graph_number} r{repetition}",
+                    flush=True,
+                )
+                continue
             graph_path = graph_dir / f"graph{graph_number}.col"
             if not graph_path.is_file():
                 raise FileNotFoundError(graph_path)
@@ -595,7 +674,14 @@ def main() -> int:
             binary = actual_binaries[variant["name"]]
             tour_path = tour_dir / safe_name(variant["name"]) / f"graph{graph_number}-r{repetition}.hcp.tour"
             tour_path.parent.mkdir(parents=True, exist_ok=True)
-            command = [str(binary), "-i", str(graph_path), *option_argv(variant.get("options", {}))]
+            input_flag = str(variant.get("input_flag", "-i"))
+            command = [
+                str(binary),
+                input_flag,
+                str(graph_path),
+                *option_argv(variant.get("options", {})),
+                *[str(value) for value in variant.get("arguments", [])],
+            ]
             if variant.get("supports_internal_timeout", False):
                 command.extend(["--timeout", str(timeout_sec)])
             if variant.get("supports_output_tour", False):
@@ -606,7 +692,11 @@ def main() -> int:
                 flush=True,
             )
             returncode, stdout, stderr, timed_out, wall_sec = run_process(command, timeout_sec, env)
-            parsed_status = "TIMEOUT" if timed_out else parse_status(stdout)
+            parsed_status = (
+                "TIMEOUT"
+                if timed_out
+                else parse_status(stdout, str(variant.get("status_protocol", "dimacs")))
+            )
             tour = parse_tour_file(tour_path) or parse_tour_stdout(stdout)
             verified, verification_reason = verify_tour(tour, vertices, edges)
             status = parsed_status
@@ -664,6 +754,8 @@ def main() -> int:
             }
             results_handle.write(json.dumps(record, ensure_ascii=False) + "\n")
             results_handle.flush()
+            if status == "SATISFIABLE" and verified:
+                solved_graph_repetitions.add(graph_repetition)
             print(
                 f"  -> {status} {wall_sec:.3f}s verified={verified} ({verification_reason})",
                 flush=True,
