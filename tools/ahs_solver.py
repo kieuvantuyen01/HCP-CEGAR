@@ -34,6 +34,36 @@ CONTROLLED_ENV = {
     "RUST_TEST_THREADS": "1",
 }
 
+STAGE_EVENT_FIELDS = (
+    "stage_index",
+    "backend",
+    "status",
+    "solver_status",
+    "returncode",
+    "timed_out",
+    "allocated_timeout_sec",
+    "wall_sec",
+    "verified",
+    "verification_reason",
+    "tour_vertices",
+    "fraction",
+    "cumulative_fraction",
+    "deadline_from_budget_start_sec",
+    "transition_reason",
+    "increments",
+    "blocking_clauses",
+    "phase_stats",
+    "phase_seconds",
+    "solver_stats",
+    "backend_result",
+    "backend_activity",
+)
+
+
+def stage_result_event(result: dict[str, Any]) -> dict[str, Any]:
+    """Return a stable, path-free stage schema for the outer benchmark JSONL."""
+    return {field: result.get(field) for field in STAGE_EVENT_FIELDS}
+
 
 def load_config(path: Path) -> dict[str, Any]:
     config = json.loads(path.read_text(encoding="utf-8"))
@@ -333,6 +363,13 @@ def run_stage(
                 "verification_reason": "process_start_failed",
                 "tour_vertices": None,
                 "raw_log": str(raw_path),
+                "increments": None,
+                "blocking_clauses": None,
+                "phase_stats": {},
+                "phase_seconds": {},
+                "solver_stats": None,
+                "backend_result": None,
+                "backend_activity": None,
                 "error": f"{type(error).__name__}: {error}",
             },
             None,
@@ -350,6 +387,42 @@ def transition_reason(stage_results: list[dict[str, Any]]) -> str:
         return "policy_route_start"
     status = str(stage_results[-1].get("status", "UNKNOWN")).lower()
     return f"previous_stage_{status}"
+
+
+def skipped_stage_result(
+    stage: dict[str, Any],
+    stage_index: int,
+    cumulative_fraction: float,
+    usable_budget: float,
+    reason: str,
+) -> dict[str, Any]:
+    """Create a no-budget stage record with the same analysis fields as a run stage."""
+    return {
+        "backend": stage["backend"],
+        "command": None,
+        "allocated_timeout_sec": 0.0,
+        "status": "SKIPPED_NO_BUDGET",
+        "solver_status": "NO_STATUS",
+        "returncode": None,
+        "timed_out": False,
+        "wall_sec": 0.0,
+        "verified": False,
+        "verification_reason": "cumulative_deadline_elapsed",
+        "tour_vertices": None,
+        "raw_log": None,
+        "stage_index": stage_index,
+        "fraction": float(stage["fraction"]),
+        "cumulative_fraction": cumulative_fraction,
+        "deadline_from_budget_start_sec": usable_budget * cumulative_fraction,
+        "transition_reason": reason,
+        "increments": None,
+        "blocking_clauses": None,
+        "phase_stats": {},
+        "phase_seconds": {},
+        "solver_stats": None,
+        "backend_result": None,
+        "backend_activity": None,
+    }
 
 
 def make_run_dir(graph_path: Path | None, requested: Path | None) -> Path:
@@ -508,17 +581,9 @@ def main() -> int:
         stage_deadline = budget_started + usable_budget * cumulative_fraction
         available = stage_deadline - time.perf_counter()
         if available <= 0:
-            result = {
-                "backend": stage["backend"],
-                "allocated_timeout_sec": 0.0,
-                "status": "SKIPPED_NO_BUDGET",
-                "solver_status": "NO_STATUS",
-                "timed_out": False,
-                "wall_sec": 0.0,
-                "verified": False,
-                "verification_reason": "cumulative_deadline_elapsed",
-                "transition_reason": reason,
-            }
+            result = skipped_stage_result(
+                stage, index, cumulative_fraction, usable_budget, reason
+            )
             stage_results.append(result)
             print(
                 f"c ahs_stage_end index={index} backend={stage['backend']} "
@@ -605,6 +670,8 @@ def main() -> int:
         "c result_json="
         + json.dumps(
             {
+                "schema_version": 1,
+                "stage_schema_version": 1,
                 "implementation": "AHS-v1-driver",
                 "policy": policy_name,
                 "route": family,
@@ -619,6 +686,7 @@ def main() -> int:
                     }
                     for result in stage_results
                 ],
+                "stage_results": [stage_result_event(result) for result in stage_results],
             },
             separators=(",", ":"),
         )

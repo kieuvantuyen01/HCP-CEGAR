@@ -520,6 +520,10 @@ Controller AHS v1 là một bộ luật tất định. Nó chỉ dùng $m/n$ và
 Lần chạy 33 graph trước dùng \code{cegar-ffi} với một wrapper chuyển luồng lệnh cardinality riêng sang API thêm clause CNF thông thường. Hai giao thức không tương đương, nên ràng buộc exactly-one của lần chạy đó không hợp lệ. AHS v1 loại backend này khỏi policy, dùng Sinz CNF chuẩn và chạy smoke test có verifier trước benchmark dài. Kết quả \code{UNKNOWN} cũ chỉ dùng để chẩn đoán, không dùng để so sánh với kết quả công bố của CCaDical.
 \end{warningbox}
 
+\begin{resultbox}[Policy tổng quát và policy tập dư]
+\code{rule\_v2} là policy tổng quát cho instance chưa biết và có cả ba backend. \code{residual\_v1} chỉ dùng trên 33 graph nằm ngoài union lịch sử 968; nó dành ngân sách cho hai HCup mode để tìm coverage bổ sung. Việc một graph thuộc core-33 không tự chứng minh binary CEGAR hiện tại sẽ timeout trên máy mới. Vì vậy đánh giá phương pháp vẫn phải chạy CEGAR-only, HCup-outside-only và HFP-only dưới cùng điều kiện. Tỷ lệ và thứ tự hiện tại là giả thuyết cần ablation, chưa phải giá trị tối ưu đã chứng minh.
+\end{resultbox}
+
 \section{Phase A: CEGAR có inprocessing}
 
 Phase A hiện có hai CEGAR portable. Lựa chọn thứ nhất là \code{cegar-fix} với Sinz CNF. Lựa chọn thứ hai là HCup chạy stage \code{outside} và blocking \code{merge-cutset}. CaDiCaL được phép dùng inprocessing để rút gọn công thức và cấu trúc tìm kiếm.

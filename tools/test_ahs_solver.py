@@ -98,13 +98,38 @@ class AhsPolicyTests(unittest.TestCase):
 
     def test_hcup_activity_is_machine_readable(self) -> None:
         activity = runner.parse_hcup_activity(
-            "FOUND MODELs: 12\n"
-            "EXTERNAL BLOCKING CLAUSE AVG SIZE: 31\n"
-            "EXTERNAL BLOCKING CLAUSE REPORTED: 27\n"
+            "ASSIGNMENTS: 1\n"
+            "DECISION LEVEL: 2\n"
+            "BACKTRACK: 3\n"
+            "PROPAGATE: 4\n"
+            "ADD REASON: 5\n"
+            "FOUND MODELs: 6\n"
+            "EXTERNAL CLAUSE EARLY CYCLE DETECTION: 7\n"
+            "EXTERNAL BLOCKING CLAUSE AVG SIZE: 8\n"
+            "EXTERNAL BLOCKING CLAUSE REPORTED: 9\n"
+            "ASSIGNMENTS:                                     11\n"
+            "DECISION LEVEL:                                  12\n"
+            "BACKTRACK:                                       13\n"
+            "PROPAGATE:                                       14\n"
+            "ADD REASON:                                      15\n"
+            "FOUND MODELs:                                    16\n"
+            "EXTERNAL CLAUSE EARLY CYCLE DETECTION:           17\n"
+            "EXTERNAL BLOCKING CLAUSE AVG SIZE:               18\n"
+            "EXTERNAL BLOCKING CLAUSE REPORTED:               19\n"
         )
         self.assertEqual(
             activity,
-            {"models": 12, "avg_blocking_clause_size": 31, "blocking_clauses_reported": 27},
+            {
+                "assignments": 11,
+                "decision_level": 12,
+                "backtracks": 13,
+                "propagations": 14,
+                "reasons": 15,
+                "models": 16,
+                "early_cycle_clauses": 17,
+                "avg_blocking_clause_size": 18,
+                "blocking_clauses_reported": 19,
+            },
         )
 
     def test_backend_result_parser_keeps_last_json_event(self) -> None:
@@ -113,6 +138,49 @@ class AhsPolicyTests(unittest.TestCase):
             'c result_json={"policy":"rule_v2","budget_exhausted":false}\n'
         )
         self.assertEqual(result, {"policy": "rule_v2", "budget_exhausted": False})
+
+    def test_outer_runner_extracts_portfolio_stage_telemetry(self) -> None:
+        stages = [{"backend": "cegar", "increments": 7}]
+        self.assertEqual(
+            runner.extract_portfolio_stage_results({"stage_results": stages}), stages
+        )
+        self.assertIsNone(runner.extract_portfolio_stage_results({"stage_results": [1]}))
+        self.assertIsNone(runner.extract_portfolio_stage_results(None))
+
+    def test_skipped_stage_uses_the_stable_event_schema(self) -> None:
+        result = ahs.skipped_stage_result(
+            {"backend": "later", "fraction": 0.2},
+            stage_index=3,
+            cumulative_fraction=1.0,
+            usable_budget=98.0,
+            reason="previous_stage_timeout",
+        )
+        event = ahs.stage_result_event(result)
+        self.assertEqual(set(event), set(ahs.STAGE_EVENT_FIELDS))
+        self.assertEqual(event["stage_index"], 3)
+        self.assertEqual(event["deadline_from_budget_start_sec"], 98.0)
+        self.assertEqual(event["status"], "SKIPPED_NO_BUDGET")
+        self.assertEqual(event["phase_stats"], {})
+
+    def test_residual_wrapper_rejects_scope_overrides_before_build(self) -> None:
+        result = subprocess.run(
+            [str(ahs.ROOT / "run_ahs_residual33.sh"), "--variants", "ahs_rule_v2"],
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("fixes config, set, and variant", result.stderr)
+
+    def test_general_wrapper_rejects_config_override_before_build(self) -> None:
+        result = subprocess.run(
+            [str(ahs.ROOT / "run_ahs_benchmark.sh"), "--config", "other.json"],
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("fixes the AHS config", result.stderr)
 
 
 class AhsVerificationTests(unittest.TestCase):
@@ -254,6 +322,8 @@ class AhsVerificationTests(unittest.TestCase):
             backend = temp / "fake_backend.py"
             backend.write_text(
                 "#!/usr/bin/env python3\n"
+                "print('overall incremented number = 3')\n"
+                "print('overall number of added block clauses = 5')\n"
                 "print('solution:')\n"
                 "print('1 2 3 4')\n"
                 "print('s SATISFIABLE')\n",
@@ -317,6 +387,14 @@ class AhsVerificationTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 10, result.stderr)
             self.assertIn("s SATISFIABLE", result.stdout)
+            backend_result = runner.parse_backend_result(result.stdout)
+            self.assertIsNotNone(backend_result)
+            self.assertEqual(backend_result["schema_version"], 1)
+            self.assertEqual(backend_result["stage_schema_version"], 1)
+            stage = backend_result["stage_results"][0]
+            self.assertEqual(stage["increments"], 3)
+            self.assertEqual(stage["blocking_clauses"], 5)
+            self.assertEqual(stage["stage_index"], 1)
             verified_tour = runner.parse_tour_file(output_tour)
             verified, reason = runner.verify_tour(
                 verified_tour,

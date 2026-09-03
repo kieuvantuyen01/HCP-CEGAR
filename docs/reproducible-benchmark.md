@@ -104,7 +104,7 @@ Không nên chạy toàn bộ 15 variant trên 1.001 graph ngay từ đầu. Ch�
 Mỗi thư mục run chứa:
 
 - `manifest.json`: commit/dirty state, hash binary và config, phiên bản toolchain, host, biến môi trường, danh sách graph và lệnh đầy đủ.
-- `results.jsonl`: một record cho mỗi `(variant, graph, repetition)`; ghi status, wall time, feature đồ thị, số increment/clause, verification, conflicts/decisions/propagations và thống kê tổng hợp từng patcher.
+- `results.jsonl`: một record cho mỗi `(variant, graph, repetition)`; ghi status, wall time, feature đồ thị, verification và telemetry của tiến trình được benchmark.
 - `raw/<variant>/`: stdout/stderr đầy đủ.
 - `tours/<variant>/`: certificate SAT.
 
@@ -115,6 +115,13 @@ c metric phase=matching_patcher iteration=17 seconds=0.012 cycles_before=42 cycl
 ```
 
 Nhờ vậy có thể phân biệt thời gian CaDiCaL, overhead của từng patcher, và patcher có thực sự giảm số chu trình con hay không. JSONL giữ tổng số call/thời gian/mức giảm chu trình theo phase; diễn biến từng iteration được giữ trong raw log để JSONL không phình quá lớn.
+
+Với variant chạy solver trực tiếp, `increments`, `blocking_clauses`, `phase_stats`,
+`solver_stats` và `backend_activity` nằm ở top-level của record. Với AHS, tiến trình
+ngoài cùng là controller nên các trường top-level này không được dùng để cộng nhập
+nhằng số liệu của nhiều backend. Telemetry của từng stage nằm tại
+`portfolio_stage_results[]`; mỗi phần tử ghi backend, ngân sách, trạng thái, xác minh,
+increment/clause, phase, solver statistics và hoạt động riêng của backend đó.
 
 ## 6. Phân tích paired, PAR và so với CSV bài báo
 

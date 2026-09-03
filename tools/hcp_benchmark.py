@@ -415,6 +415,18 @@ def parse_backend_result(stdout: str) -> dict[str, Any] | None:
     return last
 
 
+def extract_portfolio_stage_results(
+    backend_result: dict[str, Any] | None,
+) -> list[dict[str, Any]] | None:
+    """Expose controller-owned stage telemetry without changing direct-solver fields."""
+    if backend_result is None:
+        return None
+    stages = backend_result.get("stage_results")
+    if not isinstance(stages, list) or any(not isinstance(stage, dict) for stage in stages):
+        return None
+    return stages
+
+
 def parse_hcup_activity(stdout: str) -> dict[str, int] | None:
     """Keep the last HCup activity summary, including summaries printed on SIGTERM."""
     activity: dict[str, int] = {}
@@ -822,6 +834,7 @@ def main() -> int:
             phase_stats, phase_seconds = parse_metrics(stdout)
             increment_matches = INCREMENT_RE.findall(stdout)
             clause_matches = CLAUSE_RE.findall(stdout)
+            backend_result = parse_backend_result(stdout)
             record = {
                 "schema_version": 1,
                 "finished_utc": utc_now(),
@@ -851,7 +864,8 @@ def main() -> int:
                 "phase_stats": phase_stats,
                 "phase_seconds": phase_seconds,
                 "solver_stats": parse_solver_stats(stdout),
-                "backend_result": parse_backend_result(stdout),
+                "backend_result": backend_result,
+                "portfolio_stage_results": extract_portfolio_stage_results(backend_result),
                 "backend_activity": parse_hcup_activity(stdout),
                 "stdout_sha256": hashlib.sha256(stdout.encode()).hexdigest(),
                 "stderr_sha256": hashlib.sha256(stderr.encode()).hexdigest(),

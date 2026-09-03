@@ -73,16 +73,20 @@ Các tỷ lệ này là giả thuyết kỹ thuật ban đầu, chưa phải k�
 Muốn công bố chúng cần ablation cùng máy, cùng timeout và nhiều seed/order khi
 backend có yếu tố không tất định.
 
-### `residual_v1`: policy cho tập đã biết CEGAR không giải được
+### `residual_v1`: policy cho tập dư lịch sử
 
-Core 33 được tạo từ những instance mà CEGAR trước đó đã bỏ sót. Chạy lại CEGAR
-trên chính tập dư này chỉ lặp lại chi phí đã biết. `residual_v1` vì thế chỉ chạy:
+Core 33 nằm ngoài union 968 của 21 cấu hình lịch sử có dữ liệu per-instance,
+trong đó có các cấu hình CEGAR đã ghi nhận. Điều này không tự chứng minh binary
+`cegar-fix` hiện tại sẽ timeout trên cùng máy và cùng cap. `residual_v1` chỉ trả
+lời câu hỏi hẹp hơn: hai HCup mode có bổ sung coverage ngoài mốc lịch sử đó hay
+không. Policy này chạy:
 
 - HCup outside: 60--65% ngân sách;
 - HCup HFP: 35--40% ngân sách.
 
-Policy này dùng để tìm coverage bổ sung trên core 33. Không được báo cáo nó như
-policy tổng quát cho toàn bộ FHCP.
+Không được báo cáo `residual_v1` như policy tổng quát cho toàn bộ FHCP. Nếu đánh
+giá AHS v1 như một phương pháp mới, vẫn phải chạy `cegar_only` và các HCup
+baseline độc lập dưới cùng điều kiện.
 
 ## 5. Cài đặt và kiểm tra bắt buộc
 
@@ -119,10 +123,20 @@ Xem route mà không chạy solver:
   --dry-run
 ```
 
-Chạy core 33 với policy residual:
+Chạy benchmark AHS tổng quát trên một tập được chọn:
 
 ```bash
 ./run_ahs_benchmark.sh \
+  --set regression_core \
+  --variants ahs_rule_v2 \
+  --timeout 1800 \
+  --output benchmark-runs/ahs-rule-v2-regression
+```
+
+Chạy core 33 với wrapper residual cố định:
+
+```bash
+./run_ahs_residual33.sh \
   --timeout 1800 \
   --output benchmark-runs/ahs-residual33-v1-1800s
 ```
@@ -134,7 +148,7 @@ tổng thời gian ngắn hơn.
 Để đóng terminal và quay lại xem sau:
 
 ```bash
-nohup ./run_ahs_benchmark.sh \
+nohup ./run_ahs_residual33.sh \
   --timeout 1800 \
   --output benchmark-runs/ahs-residual33-v1-1800s \
   --resume \
@@ -165,7 +179,15 @@ Ba trường cần đọc cùng nhau:
 
 Với benchmark nhiều instance, `results.jsonl` chứa một record cho từng cặp
 instance--variant. Mỗi kết quả SAT vẫn có `verified=true`; nếu không, runner đổi
-trạng thái thành `INVALID_SAT`.
+trạng thái thành `INVALID_SAT`. Với một variant AHS, telemetry của từng solver
+nằm trong `portfolio_stage_results`. Các trường top-level `increments`,
+`blocking_clauses` và `backend_activity` chỉ mô tả output trực tiếp của variant;
+chúng có thể là `null` khi variant đó là controller AHS.
+
+Manifest lưu hash của binary/config và commit/dirty state để nhận diện run. Nếu
+source đang dirty, các trường này chưa đủ để rebuild chính xác vì manifest không
+lưu patch. Kết quả dùng để công bố nên được tạo từ commit sạch và toolchain đã
+ghi trong outer benchmark manifest.
 
 ## 8. Phần chưa được tích hợp
 
@@ -178,8 +200,30 @@ và wrapper Cardinality-CDCL lịch sử cũng chưa thuộc policy mặc địn
 3. ablation cho thấy có unique win hoặc giảm thời gian có ý nghĩa;
 4. log đủ để chỉ ra cơ chế nào tạo ra lợi ích.
 
-Do đó bước benchmark tiếp theo có mục tiêu cụ thể: đo xem HCup outside và HFP có
-giải thêm instance nào trong core 33. Nếu vẫn không có coverage mới, dữ liệu
-activity trong `stage_results[].backend_activity` được dùng để phân biệt solver
-đang tiến triển chậm, lặp model/subtour, hay gần như không backtrack. Khi đó mới
-chọn đúng chỗ để tối ưu tiếp thay vì chỉ tăng timeout.
+Do đó benchmark tiếp theo có hai mục tiêu cần tách riêng. Nếu ưu tiên coverage,
+chạy residual để thử hai HCup mode trên core 33. Nếu đánh giá phương pháp, chạy
+ba baseline `ahs_cegar_only`, `ahs_hcup_outside_only` và `ahs_hcup_only` độc lập,
+rồi mới so với `ahs_residual_v1`. Residual không thay thế HFP-only vì HFP chỉ nhận
+35--40% tổng ngân sách và chạy sau outside.
+
+Ba baseline độc lập có thể chạy bằng:
+
+```bash
+for AHS_VARIANT in ahs_cegar_only ahs_hcup_outside_only ahs_hcup_only; do
+  python3 tools/hcp_benchmark.py \
+    --config benchmarks/ahs_variants.json \
+    --set historical_open_33 \
+    --variants "$AHS_VARIANT" \
+    --timeout 1800 \
+    --output "benchmark-runs/${AHS_VARIANT}-open33-1800s"
+done
+```
+
+Chạy tuần tự cả ba có trần 49,5 giờ. Nếu mục tiêu chỉ là tìm nghiệm mới trong
+một ngày, ưu tiên wrapper residual; nếu mục tiêu là so sánh khoa học, cần đủ ba
+baseline hoặc chia chúng sang các máy độc lập có cấu hình tương đương.
+
+Nếu vẫn không có coverage mới, dùng
+`portfolio_stage_results[].backend_activity` để phân biệt solver đang tiến triển
+chậm, lặp model/subtour, hay gần như không backtrack. Khi đó mới chọn đúng chỗ để
+tối ưu tiếp thay vì chỉ tăng timeout.

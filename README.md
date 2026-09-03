@@ -61,7 +61,7 @@ cargo build --release
 python3 tools/hcp_benchmark.py --set regression_core --timeout 1800
 ```
 
-The runner records an immutable manifest, JSONL results, raw logs, feature telemetry, and independently verifies every SAT tour. See [`docs/reproducible-benchmark.md`](docs/reproducible-benchmark.md).
+The runner records a run-specific manifest, JSONL results, raw logs, feature telemetry, and independently verifies every SAT tour. A clean commit is still required for an exactly rebuildable published run. See [`docs/reproducible-benchmark.md`](docs/reproducible-benchmark.md).
 
 ### Adaptive Hybrid SAT-HCP (AHS v1)
 
@@ -80,12 +80,17 @@ backend used by the default policy before a long run starts.
 ```bash
 ./run_ahs.sh --build-only
 ./run_ahs.sh --input FHCPCS-col/graph950.col --policy rule_v2 --timeout 1800 --no-build
-./run_ahs_benchmark.sh --timeout 1800 --output benchmark-runs/ahs-residual33-v1-1800s
+./run_ahs_benchmark.sh --set regression_core --variants ahs_rule_v2 --timeout 1800
+./run_ahs_residual33.sh --timeout 1800 --output benchmark-runs/ahs-residual33-v1-1800s
 ```
 
-The single-instance command uses the general `rule_v2` policy. The core-33
-script intentionally uses `residual_v1`, because those instances were selected
-after an earlier CEGAR miss; it must not be reported as the full-dataset policy.
+`run_ahs_benchmark.sh` is the general runner. The explicitly named core-33
+wrapper uses `residual_v1`, because those instances are outside the historical
+968-instance union; it must not be reported as the full-dataset policy.
+
+For AHS variants, backend metrics are stored per stage in
+`results.jsonl[].portfolio_stage_results`; top-level `increments` and
+`blocking_clauses` describe only output printed directly by the selected variant.
 
 Implementation details, artifacts, policy fractions, and current limitations are documented in [`docs/ahs-implementation.md`](docs/ahs-implementation.md).
 
