@@ -82,8 +82,9 @@ if [[ "$MODE" == "check" ]]; then
     check_checkout "$EXTERNAL_DIR/SAT_HCP" "$CRE_COMMIT" "CRE"
     [[ -x "$VENV_DIR/bin/python" ]] || { echo "Missing Python environment: $VENV_DIR" >&2; exit 1; }
     "$VENV_DIR/bin/python" -c 'from pysat.solvers import Cadical195'
-    [[ -x "$REPO_DIR/src/cegar-ffi/target/release/cegar-ffi" ]] || { echo "CEGAR binary is not built" >&2; exit 1; }
+    [[ -x "$REPO_DIR/src/cegar-fix/target/release/cegar-fix" ]] || { echo "Portable CEGAR binary is not built" >&2; exit 1; }
     [[ -x "$EXTERNAL_DIR/hcup/cmake-build-release/hcup" ]] || { echo "HCup binary is not built" >&2; exit 1; }
+    "$VENV_DIR/bin/python" "$REPO_DIR/tools/backend_smoke.py"
     echo "All pinned sources, Python dependencies, and solver binaries are ready."
     exit 0
 fi
@@ -106,5 +107,5 @@ fi
 
 require_command cargo
 require_command cmake
-"$REPO_DIR/run_ahs.sh" --policy rule_v1 --build-only
+"$REPO_DIR/run_ahs.sh" --policy rule_v2 --build-only
 "$REPO_DIR/setup_dependencies.sh" --check

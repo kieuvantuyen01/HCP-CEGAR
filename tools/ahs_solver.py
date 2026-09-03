@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AHS v0: a verified, budgeted portfolio for Hamiltonian-cycle SAT solvers.
+"""AHS v1: a verified, budgeted portfolio for Hamiltonian-cycle SAT solvers.
 
 This is deliberately a fixed-rule controller, not a learned selector and not a
 new claim that the backends share SAT state. It selects an explicit route from
@@ -51,7 +51,7 @@ def validate_config(config: dict[str, Any]) -> None:
     if controller.get("type") != "fixed_rules":
         raise ValueError("this AHS implementation supports only a fixed_rules controller")
     if controller.get("uses_machine_learning") is not False:
-        raise ValueError("AHS v0 must explicitly disable machine learning")
+        raise ValueError("AHS v1 must explicitly disable machine learning")
 
     raw_backends = config.get("backends")
     if not isinstance(raw_backends, list) or not raw_backends:
@@ -308,6 +308,7 @@ def run_stage(
                 "phase_seconds": phase_seconds,
                 "solver_stats": runner.parse_solver_stats(stdout),
                 "backend_result": runner.parse_backend_result(stdout),
+                "backend_activity": runner.parse_hcup_activity(stdout),
             }
         )
         return result, tour
@@ -412,7 +413,7 @@ def main() -> int:
         stages = config["policies"][policy_name]["routes"][family]
         cumulative = cumulative_stage_fractions(stages)
         print(
-            f"c ahs implementation=AHS-v0-driver controller=fixed_rules "
+            f"c ahs implementation=AHS-v1-driver controller=fixed_rules "
             f"machine_learning=false policy={policy_name} route={family} "
             f"budget_sec={args.budget:g}"
         )
@@ -453,7 +454,7 @@ def main() -> int:
     manifest = {
         "schema_version": 1,
         "created_utc": runner.utc_now(),
-        "implementation": "AHS-v0-driver",
+        "implementation": "AHS-v1-driver",
         "controller": str(Path(__file__).resolve()),
         "controller_mode": config["controller"],
         "controller_sha256": runner.sha256_file(Path(__file__).resolve()),
@@ -493,7 +494,7 @@ def main() -> int:
     )
 
     print(
-        f"c ahs implementation=AHS-v0-driver controller=fixed_rules "
+        f"c ahs implementation=AHS-v1-driver controller=fixed_rules "
         f"machine_learning=false policy={policy_name} route={family} "
         f"budget_sec={args.budget:g}"
     )
@@ -563,6 +564,7 @@ def main() -> int:
             winning_backend = backend["name"]
             break
 
+    route_exhausted = final_status is None
     if final_status is None:
         final_status = exhausted_status(stage_results)
 
@@ -570,6 +572,12 @@ def main() -> int:
         assert final_tour is not None
         write_tour(output_tour, final_tour, graph_path.stem)
     total_wall_sec = time.perf_counter() - budget_started
+    last_stage = stage_results[-1] if stage_results else {}
+    budget_exhausted = route_exhausted and (
+        bool(last_stage.get("timed_out"))
+        or last_stage.get("status") == "SKIPPED_NO_BUDGET"
+        or total_wall_sec >= usable_budget - 0.05
+    )
     summary = {
         "schema_version": 1,
         "finished_utc": runner.utc_now(),
@@ -582,6 +590,8 @@ def main() -> int:
         "budget_sec": args.budget,
         "within_total_budget": total_wall_sec <= args.budget,
         "budget_overrun_sec": max(0.0, total_wall_sec - args.budget),
+        "budget_exhausted": budget_exhausted,
+        "route_exhausted": route_exhausted,
         "policy": policy_name,
         "route": family,
         "controller_mode": config["controller"],
@@ -591,6 +601,28 @@ def main() -> int:
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     print(f"c ahs_summary={run_dir / 'summary.json'}")
+    print(
+        "c result_json="
+        + json.dumps(
+            {
+                "implementation": "AHS-v1-driver",
+                "policy": policy_name,
+                "route": family,
+                "budget_exhausted": budget_exhausted,
+                "route_exhausted": route_exhausted,
+                "winning_backend": winning_backend,
+                "stage_outcomes": [
+                    {
+                        "backend": result["backend"],
+                        "status": result["status"],
+                        "wall_sec": result["wall_sec"],
+                    }
+                    for result in stage_results
+                ],
+            },
+            separators=(",", ":"),
+        )
+    )
     if final_status == "SATISFIABLE":
         print("solution:")
         print(" ".join(str(vertex) for vertex in final_tour or []))

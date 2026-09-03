@@ -30,6 +30,17 @@ INCREMENT_RE = re.compile(r"overall incremented number\s*=\s*(\d+)")
 CLAUSE_RE = re.compile(r"overall number of added block clauses\s*=\s*(\d+)")
 SOLVER_STATS_RE = re.compile(r"^c solver_stats (?P<body>.*)$")
 BACKEND_RESULT_PREFIX = "c result_json="
+HCUP_ACTIVITY_FIELDS = {
+    "ASSIGNMENTS": "assignments",
+    "DECISION LEVEL": "decision_level",
+    "BACKTRACK": "backtracks",
+    "PROPAGATE": "propagations",
+    "ADD REASON": "reasons",
+    "FOUND MODELs": "models",
+    "EXTERNAL CLAUSE EARLY CYCLE DETECTION": "early_cycle_clauses",
+    "EXTERNAL BLOCKING CLAUSE AVG SIZE": "avg_blocking_clause_size",
+    "EXTERNAL BLOCKING CLAUSE REPORTED": "blocking_clauses_reported",
+}
 
 
 def utc_now() -> str:
@@ -402,6 +413,20 @@ def parse_backend_result(stdout: str) -> dict[str, Any] | None:
         if isinstance(payload, dict):
             last = payload
     return last
+
+
+def parse_hcup_activity(stdout: str) -> dict[str, int] | None:
+    """Keep the last HCup activity summary, including summaries printed on SIGTERM."""
+    activity: dict[str, int] = {}
+    for line in stdout.splitlines():
+        key, separator, raw_value = line.partition(":")
+        field = HCUP_ACTIVITY_FIELDS.get(key.strip())
+        if not separator or field is None:
+            continue
+        value = raw_value.strip()
+        if value.isdigit():
+            activity[field] = int(value)
+    return activity or None
 
 
 def terminate_process(process: subprocess.Popen[str]) -> None:
@@ -827,6 +852,7 @@ def main() -> int:
                 "phase_seconds": phase_seconds,
                 "solver_stats": parse_solver_stats(stdout),
                 "backend_result": parse_backend_result(stdout),
+                "backend_activity": parse_hcup_activity(stdout),
                 "stdout_sha256": hashlib.sha256(stdout.encode()).hexdigest(),
                 "stderr_sha256": hashlib.sha256(stderr.encode()).hexdigest(),
                 "raw_log": str(raw_path),

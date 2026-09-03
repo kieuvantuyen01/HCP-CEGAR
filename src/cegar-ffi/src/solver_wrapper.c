@@ -1,5 +1,3 @@
-#include <stdbool.h>
-
 extern void* ccadical_init(void);
 extern void ccadical_release(void* ptr);
 extern void ccadical_add(void* ptr, int lit);
@@ -24,9 +22,4 @@ int Solver_solve(void* ptr) {
 
 int Solver_val(void* ptr, int lit) {
     return ccadical_val(ptr, lit);
-}
-
-void Solver_CARadd(void* ptr, int lit, bool encoding) {
-    (void)encoding;
-    ccadical_add(ptr, lit);
 }

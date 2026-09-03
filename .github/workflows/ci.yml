@@ -31,12 +31,21 @@ jobs:
             --timeout 30 \
             --output benchmark-runs/ci-cre-graph1
 
+      - name: Repaired legacy FFI verified smoke test
+        run: |
+          python3 tools/hcp_benchmark.py \
+            --config benchmarks/hybrid_variants.json \
+            --instances 1 \
+            --variants cegar_ffi_portable_asym_replay \
+            --timeout 30 \
+            --output benchmark-runs/ci-cegar-ffi-graph1
+
       - name: Rule-based AHS verified smoke test
         run: |
           set +e
           ./run_ahs.sh \
             --input FHCPCS-col/graph1.col \
-            --policy rule_v1 \
+            --policy rule_v2 \
             --timeout 30 \
             --no-build \
             --run-dir ahs-runs/ci-graph1 \

@@ -3,10 +3,41 @@
   "graph_dir": "FHCPCS-col",
   "timeout_sec": 1800,
   "expected_status": "SATISFIABLE",
-  "default_variants": [
-    "ahs_rule_v1"
-  ],
+  "default_variants": ["ahs_rule_v2"],
   "variants": [
+    {
+      "name": "ahs_rule_v2",
+      "source_dir": ".",
+      "binary": "tools/ahs_solver.py",
+      "build_system": "none",
+      "supports_output_tour": true,
+      "supports_internal_timeout": true,
+      "supports_run_dir": true,
+      "external_timeout_grace_sec": 5,
+      "options": {"--policy": "rule_v2", "--no-build": true}
+    },
+    {
+      "name": "ahs_residual_v1",
+      "source_dir": ".",
+      "binary": "tools/ahs_solver.py",
+      "build_system": "none",
+      "supports_output_tour": true,
+      "supports_internal_timeout": true,
+      "supports_run_dir": true,
+      "external_timeout_grace_sec": 5,
+      "options": {"--policy": "residual_v1", "--no-build": true}
+    },
+    {
+      "name": "ahs_hcup_outside_only",
+      "source_dir": ".",
+      "binary": "tools/ahs_solver.py",
+      "build_system": "none",
+      "supports_output_tour": true,
+      "supports_internal_timeout": true,
+      "supports_run_dir": true,
+      "external_timeout_grace_sec": 5,
+      "options": {"--policy": "hcup_outside_only", "--no-build": true}
+    },
     {
       "name": "ahs_hcup_only",
       "source_dir": ".",
@@ -16,24 +47,7 @@
       "supports_internal_timeout": true,
       "supports_run_dir": true,
       "external_timeout_grace_sec": 5,
-      "options": {
-        "--policy": "hcup_only",
-        "--no-build": true
-      }
-    },
-    {
-      "name": "ahs_rule_v1",
-      "source_dir": ".",
-      "binary": "tools/ahs_solver.py",
-      "build_system": "none",
-      "supports_output_tour": true,
-      "supports_internal_timeout": true,
-      "supports_run_dir": true,
-      "external_timeout_grace_sec": 5,
-      "options": {
-        "--policy": "rule_v1",
-        "--no-build": true
-      }
+      "options": {"--policy": "hcup_only", "--no-build": true}
     },
     {
       "name": "ahs_cegar_only",
@@ -44,24 +58,7 @@
       "supports_internal_timeout": true,
       "supports_run_dir": true,
       "external_timeout_grace_sec": 5,
-      "options": {
-        "--policy": "cegar_only",
-        "--no-build": true
-      }
-    },
-    {
-      "name": "ahs_exploratory_v1",
-      "source_dir": ".",
-      "binary": "tools/ahs_solver.py",
-      "build_system": "none",
-      "supports_output_tour": true,
-      "supports_internal_timeout": true,
-      "supports_run_dir": true,
-      "external_timeout_grace_sec": 5,
-      "options": {
-        "--policy": "exploratory_v1",
-        "--no-build": true
-      }
+      "options": {"--policy": "cegar_only", "--no-build": true}
     }
   ]
 }

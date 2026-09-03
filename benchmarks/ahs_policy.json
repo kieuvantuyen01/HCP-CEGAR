@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "default_policy": "rule_v1",
+  "default_policy": "rule_v2",
   "controller": {
     "type": "fixed_rules",
     "uses_machine_learning": false,
@@ -12,27 +12,51 @@
   },
   "backends": [
     {
-      "name": "paper_ccad_best_replay",
-      "source_dir": "src/cegar-ffi",
-      "binary": "src/cegar-ffi/target/release/cegar-ffi",
+      "name": "cegar_sinz_2loop_2opt3",
+      "source_dir": "src/cegar-fix",
+      "binary": "src/cegar-fix/target/release/cegar-fix",
       "build_system": "cargo",
-      "build_prerequisites": [
-        {
-          "name": "cegar_fix_cadical_provider",
-          "source_dir": "src/cegar-fix",
-          "binary": "src/cegar-fix/target/release/cegar-fix",
-          "build_system": "cargo"
-        }
-      ],
       "status_protocol": "dimacs",
       "trust_unsat": true,
-      "sat_solver": "CaDiCaL through the upstream FFI",
+      "supports_internal_timeout": true,
+      "supports_output_tour": true,
+      "sat_solver": "CaDiCaL with a portable Sinz exact-one encoding",
       "options": {
+        "-e": "1",
         "-b": "3",
-        "-y": "3",
+        "-y": "0",
         "-t": "3",
-        "-l": "1"
+        "-l": "1",
+        "--three-opt": "0",
+        "--cegar-fallback": "0",
+        "--mtz-stall": "0",
+        "--adaptive-escalation": "0",
+        "--degree2-triangle-prune": "0",
+        "--degree2-contraction": "0",
+        "--global-short-cuts": "0",
+        "--short-cycle-sec": "0",
+        "--cluster-cuts": "0",
+        "--modular-prepass": "0",
+        "--hub-partition-prepass": "0",
+        "--hub-patcher": "0",
+        "--matching-patcher": "0",
+        "--chained-lk": "0",
+        "--ils-patcher": "0",
+        "--macro-patcher": "0",
+        "--telemetry": "1"
       }
+    },
+    {
+      "name": "hcup_outside_mergecutset",
+      "source_dir": "external/hcup",
+      "binary": "external/hcup/cmake-build-release/hcup",
+      "build_system": "cmake",
+      "cmake_build_dir": "cmake-build-release",
+      "cmake_target": "hcup",
+      "status_protocol": "hcup",
+      "trust_unsat": true,
+      "sat_solver": "CaDiCaL with outside merge-cutset refinement",
+      "arguments": ["-b", "merge-cutset", "-s", "outside", "-o", "vertices"]
     },
     {
       "name": "hcup_hfp_preventsubcycle",
@@ -44,105 +68,77 @@
       "status_protocol": "hcup",
       "trust_unsat": true,
       "sat_solver": "CaDiCaL with IPASIR-UP",
-      "arguments": [
-        "-b",
-        "merge-cutset",
-        "-s",
-        "outside",
-        "-p",
-        "prevent-subcycle",
-        "-o",
-        "vertices"
-      ]
-    },
-    {
-      "name": "hcup_outside_mergecutset",
-      "source_dir": "external/hcup",
-      "binary": "external/hcup/cmake-build-release/hcup",
-      "build_system": "cmake",
-      "cmake_build_dir": "cmake-build-release",
-      "cmake_target": "hcup",
-      "status_protocol": "hcup",
-      "trust_unsat": true,
-      "sat_solver": "CaDiCaL with IPASIR-UP",
-      "arguments": [
-        "-b",
-        "merge-cutset",
-        "-s",
-        "outside",
-        "-o",
-        "vertices"
-      ]
+      "arguments": ["-b", "merge-cutset", "-s", "outside", "-p", "prevent-subcycle", "-o", "vertices"]
     }
   ],
   "policies": {
     "hcup_only": {
-      "description": "Control policy: run only the HCup HFP backend.",
+      "description": "Control policy: run only HCup HFP prevent-subcycle.",
       "routes": {
-        "dense": [
-          {"backend": "hcup_hfp_preventsubcycle", "fraction": 1.0}
-        ],
-        "sparse_degree2": [
-          {"backend": "hcup_hfp_preventsubcycle", "fraction": 1.0}
-        ],
-        "sparse_other": [
-          {"backend": "hcup_hfp_preventsubcycle", "fraction": 1.0}
-        ]
+        "dense": [{"backend": "hcup_hfp_preventsubcycle", "fraction": 1.0}],
+        "sparse_degree2": [{"backend": "hcup_hfp_preventsubcycle", "fraction": 1.0}],
+        "sparse_other": [{"backend": "hcup_hfp_preventsubcycle", "fraction": 1.0}]
+      }
+    },
+    "hcup_outside_only": {
+      "description": "Control policy: run only HCup outside merge-cutset.",
+      "routes": {
+        "dense": [{"backend": "hcup_outside_mergecutset", "fraction": 1.0}],
+        "sparse_degree2": [{"backend": "hcup_outside_mergecutset", "fraction": 1.0}],
+        "sparse_other": [{"backend": "hcup_outside_mergecutset", "fraction": 1.0}]
       }
     },
     "cegar_only": {
-      "description": "Control policy: replay only the strongest reported CEGAR configuration.",
+      "description": "Control policy: run the portable Sinz CEGAR baseline only.",
       "routes": {
-        "dense": [
-          {"backend": "paper_ccad_best_replay", "fraction": 1.0}
-        ],
-        "sparse_degree2": [
-          {"backend": "paper_ccad_best_replay", "fraction": 1.0}
-        ],
-        "sparse_other": [
-          {"backend": "paper_ccad_best_replay", "fraction": 1.0}
-        ]
+        "dense": [{"backend": "cegar_sinz_2loop_2opt3", "fraction": 1.0}],
+        "sparse_degree2": [{"backend": "cegar_sinz_2loop_2opt3", "fraction": 1.0}],
+        "sparse_other": [{"backend": "cegar_sinz_2loop_2opt3", "fraction": 1.0}]
       }
     },
-    "rule_v1": {
-      "description": "Conservative two-stage AHS policy. Fractions are hypotheses to be evaluated, not claimed optima.",
+    "rule_v2": {
+      "description": "Safe three-stage general policy using only portable, independently verified backends. Fractions remain experimental.",
       "routes": {
         "dense": [
-          {"backend": "paper_ccad_best_replay", "fraction": 0.9},
-          {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.1}
+          {"backend": "hcup_outside_mergecutset", "fraction": 0.5},
+          {"backend": "cegar_sinz_2loop_2opt3", "fraction": 0.35},
+          {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.15}
         ],
         "sparse_degree2": [
-          {"backend": "paper_ccad_best_replay", "fraction": 0.7},
+          {"backend": "cegar_sinz_2loop_2opt3", "fraction": 0.4},
+          {"backend": "hcup_outside_mergecutset", "fraction": 0.3},
           {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.3}
         ],
         "sparse_other": [
-          {"backend": "paper_ccad_best_replay", "fraction": 0.8},
+          {"backend": "cegar_sinz_2loop_2opt3", "fraction": 0.45},
+          {"backend": "hcup_outside_mergecutset", "fraction": 0.35},
           {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.2}
         ]
       }
     },
-    "exploratory_v1": {
-      "description": "Three-stage exploratory policy; use only in labelled experiments.",
+    "residual_v1": {
+      "description": "Late-portfolio policy for a set already missed by CEGAR; it must not be reported as the general AHS policy.",
       "routes": {
         "dense": [
-          {"backend": "paper_ccad_best_replay", "fraction": 0.7},
-          {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.2},
-          {"backend": "hcup_outside_mergecutset", "fraction": 0.1}
+          {"backend": "hcup_outside_mergecutset", "fraction": 0.65},
+          {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.35}
         ],
         "sparse_degree2": [
-          {"backend": "paper_ccad_best_replay", "fraction": 0.55},
-          {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.3},
-          {"backend": "hcup_outside_mergecutset", "fraction": 0.15}
+          {"backend": "hcup_outside_mergecutset", "fraction": 0.6},
+          {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.4}
         ],
         "sparse_other": [
-          {"backend": "paper_ccad_best_replay", "fraction": 0.6},
-          {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.25},
-          {"backend": "hcup_outside_mergecutset", "fraction": 0.15}
+          {"backend": "hcup_outside_mergecutset", "fraction": 0.65},
+          {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.35}
         ]
       }
     }
   },
   "disabled_components": [
+    {
+      "name": "paper_ccad_best_replay",
+      "reason": "Disabled after the open-33 run exposed an invalid compatibility shim: the custom Cardinality-CDCL stream had been forwarded to ordinary ccadical_add. The published CCAD result remains historical evidence, not a runnable portable backend."
+    },
     {
       "name": "cross_backend_cut_transfer",
       "reason": "The current backend CLIs do not expose a common sound cut import/export interface."
@@ -153,7 +149,7 @@
     },
     {
       "name": "cre_cegar",
-      "reason": "The external CRE prototype now has an experimental verify-cut-solve mode, but it remains disabled until broader exhaustive correctness tests and paired coverage ablations establish it as a sound, useful AHS component."
+      "reason": "The external CRE prototype remains disabled until broader exhaustive correctness tests and paired coverage ablations establish it as a sound, useful AHS component."
     }
   ]
 }

@@ -73,7 +73,7 @@
       ]
     },
     {
-      "name": "paper_ccad_best_replay",
+      "name": "cegar_ffi_portable_asym_replay",
       "source_dir": "src/cegar-ffi",
       "binary": "src/cegar-ffi/target/release/cegar-ffi",
       "build_prerequisites": [
@@ -89,7 +89,8 @@
         "-y": "3",
         "-t": "3",
         "-l": "1"
-      }
+      },
+      "notes": "Repaired FFI implementation using portable Sinz CNF; this is not an exact replay of the published Cardinality-CDCL binary."
     },
     {
       "name": "paper_sinz_2loop_replay",

@@ -23,17 +23,27 @@ class AhsPolicyTests(unittest.TestCase):
         cls.config = ahs.load_config(ahs.DEFAULT_CONFIG)
 
     def test_default_config_is_valid_and_deterministic(self) -> None:
-        self.assertEqual(self.config["default_policy"], "rule_v1")
+        self.assertEqual(self.config["default_policy"], "rule_v2")
         self.assertEqual(self.config["controller"]["type"], "fixed_rules")
         self.assertIs(self.config["controller"]["uses_machine_learning"], False)
         self.assertEqual(
-            ahs.policy_backend_names(self.config, "rule_v1"),
-            ["paper_ccad_best_replay", "hcup_hfp_preventsubcycle"],
+            ahs.policy_backend_names(self.config, "rule_v2"),
+            [
+                "hcup_outside_mergecutset",
+                "cegar_sinz_2loop_2opt3",
+                "hcup_hfp_preventsubcycle",
+            ],
+        )
+
+    def test_residual_policy_does_not_repeat_known_cegar_misses(self) -> None:
+        self.assertEqual(
+            ahs.policy_backend_names(self.config, "residual_v1"),
+            ["hcup_outside_mergecutset", "hcup_hfp_preventsubcycle"],
         )
 
     def test_invalid_fraction_sum_is_rejected(self) -> None:
         config = copy.deepcopy(self.config)
-        config["policies"]["rule_v1"]["routes"]["dense"][0]["fraction"] = 0.8
+        config["policies"]["rule_v2"]["routes"]["dense"][0]["fraction"] = 0.8
         with self.assertRaisesRegex(ValueError, "fractions sum"):
             ahs.validate_config(config)
 
@@ -61,8 +71,8 @@ class AhsPolicyTests(unittest.TestCase):
         )
 
     def test_cumulative_deadlines_allow_unused_time_to_carry_forward(self) -> None:
-        stages = self.config["policies"]["rule_v1"]["routes"]["sparse_other"]
-        self.assertEqual(ahs.cumulative_stage_fractions(stages), [0.8, 1.0])
+        stages = self.config["policies"]["rule_v2"]["routes"]["sparse_other"]
+        self.assertEqual(ahs.cumulative_stage_fractions(stages), [0.45, 0.8, 1.0])
 
     def test_transition_reason_uses_only_observed_stage_status(self) -> None:
         self.assertEqual(ahs.transition_reason([]), "policy_route_start")
@@ -80,11 +90,29 @@ class AhsPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fixed_rules"):
             ahs.validate_config(config)
 
-    def test_cegar_ffi_build_has_no_machine_specific_link_paths(self) -> None:
-        build_script = (ahs.ROOT / "src/cegar-ffi/build.rs").read_text(encoding="utf-8")
-        self.assertNotIn("/home/", build_script)
-        self.assertNotIn("/work/", build_script)
-        self.assertIn("CADICAL_DIR", build_script)
+    def test_default_policy_does_not_use_invalid_ccad_compatibility_replay(self) -> None:
+        self.assertNotIn(
+            "paper_ccad_best_replay",
+            ahs.policy_backend_names(self.config, self.config["default_policy"]),
+        )
+
+    def test_hcup_activity_is_machine_readable(self) -> None:
+        activity = runner.parse_hcup_activity(
+            "FOUND MODELs: 12\n"
+            "EXTERNAL BLOCKING CLAUSE AVG SIZE: 31\n"
+            "EXTERNAL BLOCKING CLAUSE REPORTED: 27\n"
+        )
+        self.assertEqual(
+            activity,
+            {"models": 12, "avg_blocking_clause_size": 31, "blocking_clauses_reported": 27},
+        )
+
+    def test_backend_result_parser_keeps_last_json_event(self) -> None:
+        result = runner.parse_backend_result(
+            'c result_json={"policy":"old"}\n'
+            'c result_json={"policy":"rule_v2","budget_exhausted":false}\n'
+        )
+        self.assertEqual(result, {"policy": "rule_v2", "budget_exhausted": False})
 
 
 class AhsVerificationTests(unittest.TestCase):

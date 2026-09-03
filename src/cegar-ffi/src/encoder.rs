@@ -1,5 +1,5 @@
 use crate::graph::*;
-use crate::hcp_solver::{Solver,Solver_add,Solver_CARadd};
+use crate::hcp_solver::{Solver, Solver_add};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub struct Encoder {
@@ -88,8 +88,8 @@ impl Encoder {
                 in_lits.push(self.graph_lit_map[&(v, u)]);
             }
             //入次数と出次数のexact-oneをcnfに追加する
-            Encoder::exact_n(solver,&out_lits,1);
-            Encoder::exact_n(solver,&in_lits,1);
+            self.exact_one(solver, &out_lits);
+            self.exact_one(solver, &in_lits);
         }
 
 
@@ -136,48 +136,72 @@ impl Encoder {
         
     }
 
-    pub fn exact_n(solver:*mut Solver,lits:&Vec<Lit>,n:i32) {
-        Encoder::at_least_n(solver, lits,n);
-        Encoder::at_most_n(solver, lits,n);
-    }
-
-    pub fn at_most_n(solver:*mut Solver, lits: &Vec<Lit>,n:i32) {
-        let neg_num:i32 = lits.iter().filter(|&&x| x.is_pos()).count() as i32;
-        unsafe{
-            Solver_CARadd(solver,-n+neg_num, false);
-            for lit in lits.iter(){
-                // println!("{}",-(lit.vidx() as i32));
-                Solver_CARadd(solver, -lit.get_lit(), false);
-            }
-            Solver_CARadd(solver,0, false);
+    /// Encode exactly one selected literal with a linear Sinz counter.
+    ///
+    /// The upstream `cegar-ffi` expected a patched Cardinality-CDCL API named
+    /// `Solver_CARadd`.  Forwarding that stream to ordinary `ccadical_add`
+    /// changes a cardinality constraint into a malformed CNF clause.  Keep the
+    /// portable backend on the standard CaDiCaL API and encode the constraint
+    /// explicitly instead.
+    pub fn exact_one(&mut self, solver: *mut Solver, lits: &[Lit]) {
+        if lits.is_empty() {
+            Encoder::clause_add(solver, &[]);
+            return;
         }
+        Encoder::clause_add(solver, lits);
+        self.at_most_one_sinz(solver, lits);
     }
 
-    
-    //at-least-one節
-    pub fn at_least_n(solver:*mut Solver,lits: &Vec<Lit>,n:i32) {
-        unsafe{
-            Solver_CARadd(solver,n, false);
-            for lit in lits.iter(){
-                Solver_CARadd(solver, lit.get_lit(), false);
-            }
-            Solver_CARadd(solver,0, false);
+    fn at_most_one_sinz(&mut self, solver: *mut Solver, lits: &[Lit]) {
+        if lits.len() <= 1 {
+            return;
         }
+        if lits.len() == 2 {
+            Encoder::clause_add(solver, &[!lits[0], !lits[1]]);
+            return;
+        }
+
+        let sequential: Vec<Lit> = (0..lits.len() - 1)
+            .map(|_| self.instance.new_lit())
+            .collect();
+        Encoder::clause_add(solver, &[!lits[0], sequential[0]]);
+        for index in 1..lits.len() - 1 {
+            Encoder::clause_add(solver, &[!lits[index], sequential[index]]);
+            Encoder::clause_add(solver, &[!sequential[index - 1], sequential[index]]);
+            Encoder::clause_add(solver, &[!lits[index], !sequential[index - 1]]);
+        }
+        Encoder::clause_add(
+            solver,
+            &[!lits[lits.len() - 1], !sequential[sequential.len() - 1]],
+        );
     }
 
-    pub fn clauses_add(solver:*mut Solver,clauses: &Vec<Vec<Lit>>){
+    /// The only non-exact cardinality calls in this solver are `sum <= len-1`:
+    /// a single no-good clause that blocks all literals from being true.
+    pub fn at_most_n(solver: *mut Solver, lits: &[Lit], n: i32) {
+        assert_eq!(n, lits.len() as i32 - 1, "unsupported at-most bound");
+        let clause: Vec<Lit> = lits.iter().map(|lit| !*lit).collect();
+        Encoder::clause_add(solver, &clause);
+    }
+
+    /// All cut-set calls request at least one boundary arc.
+    pub fn at_least_n(solver: *mut Solver, lits: &[Lit], n: i32) {
+        assert_eq!(n, 1, "unsupported at-least bound");
+        Encoder::clause_add(solver, lits);
+    }
+
+    pub fn clauses_add(solver: *mut Solver, clauses: &[Vec<Lit>]) {
         for clause in clauses.iter(){
             Encoder::clause_add(solver, clause);
         }
     }
 
-    pub fn clause_add(solver:*mut Solver,clause:&Vec<Lit>){
-        for lit in clause.iter(){
-            unsafe{
+    pub fn clause_add(solver: *mut Solver, clause: &[Lit]) {
+        unsafe {
+            for lit in clause.iter() {
                 Solver_add(solver, lit.get_lit());
-                Solver_add(solver,0);
             }
-            
+            Solver_add(solver, 0);
         }
     }
 
@@ -558,4 +582,3 @@ impl std::ops::Not for Lit {
         Lit::new(-self.lit)
     }
 }
-

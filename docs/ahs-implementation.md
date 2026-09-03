@@ -1,184 +1,185 @@
-# AHS v0: cài đặt, cách chạy và giới hạn hiện tại
+# AHS v1: cách chạy và ý nghĩa của từng thành phần
 
-## 1. AHS v0 thực sự làm gì?
+## 1. AHS v1 hiện làm gì?
 
-AHS v0 là một bộ điều phối có kiểm chứng cho các SAT solver HCP hiện có. Một lệnh AHS thực hiện bốn việc:
+AHS v1 là một portfolio SAT có ngân sách chung. Trên mỗi graph, controller:
 
-1. Đọc đồ thị và tính các đặc trưng đơn giản, tái lập được.
-2. Chọn một lộ trình solver từ tệp chính sách cố định.
-3. Chạy tuần tự các backend trong **một ngân sách thời gian tổng**.
-4. Chỉ công nhận `SATISFIABLE` khi chu trình được kiểm tra độc lập trên đồ thị đầu vào.
+1. đọc các đặc trưng đơn giản của graph;
+2. chọn một thứ tự backend cố định;
+3. cấp cho mỗi backend một phần của tổng thời gian;
+4. dừng ngay khi tìm được chu trình Hamilton hợp lệ;
+5. kiểm tra lại tour bằng một verifier độc lập trước khi báo `SATISFIABLE`.
 
-Phiên bản này tích hợp ở mức tiến trình. CEGAR và HCup chưa truyền learned clauses hoặc cut-set trực tiếp cho nhau.
+Đây chưa phải mô hình học máy. Các luật chọn route và tỷ lệ thời gian nằm trong
+[`benchmarks/ahs_policy.json`](../benchmarks/ahs_policy.json), nên mỗi lần chạy có
+thể tái lập và kiểm tra được. Việc tích hợp hiện ở mức tiến trình; các backend
+chưa truyền SAT state hoặc learned clause cho nhau.
 
-Controller hiện tại **không dùng học máy**. Nó không có bước train, không nạp model và không cần thư viện ML. Route được chọn bằng hai luật cố định trên `m/n` và tỷ lệ đỉnh bậc 2; config và lý do chuyển stage đều được ghi vào artifact.
+## 2. Vì sao AHS v0 không được dùng tiếp?
 
-## 2. Thành phần đang bật
+Lần chạy `ahs-open33-1800s` cho kết quả `UNKNOWN` trên cả 33 instance. Log còn
+cho thấy model đầu tiên của backend CEGAR cũ thường chứa nhiều cycle rất ngắn và
+số subtour gần như không tiến triển.
 
-Chính sách mặc định `rule_v1` dùng:
+Rà soát source tìm được lỗi quan trọng hơn: wrapper `Solver_CARadd` đã chuyển
+luồng lệnh cardinality riêng của Cardinality-CDCL thẳng sang hàm thêm mệnh đề CNF
+thông thường của CaDiCaL. Hai giao thức này không tương đương. Vì vậy cấu hình đó
+không mã hóa đúng ràng buộc exactly-one và không được xem là một replay hợp lệ của
+kết quả bài báo.
 
-- `paper_ccad_best_replay`: cấu hình CEGAR `-b 3 -y 3 -t 3 -l 1`;
-- `hcup_hfp_preventsubcycle`: HCup với `merge-cutset`, refinement `outside` và propagator `prevent-subcycle`.
+AHS v1 xử lý vấn đề này theo hai lớp:
 
-Ba nhóm đồ thị và phân bổ thử nghiệm là:
+- policy mặc định không còn gọi backend replay lỗi;
+- source FFI được đổi sang mã hóa exactly-one Sinz bằng CNF chuẩn. Backend FFI
+  này vẫn chưa được đưa trở lại portfolio cho đến khi được biên dịch và benchmark
+  độc lập trên môi trường Linux.
 
-| Nhóm | Điều kiện | CEGAR | HCup-HFP |
-|---|---|---:|---:|
-| `dense` | `m/n >= 3` | 90% | 10% |
-| `sparse_degree2` | `m/n < 3` và tỷ lệ đỉnh bậc 2 `> 10%` | 70% | 30% |
-| `sparse_other` | còn lại | 80% | 20% |
+Kết quả 33/33 `UNKNOWN` cũ chỉ có giá trị chẩn đoán. Không dùng nó để kết luận
+phương pháp trong bài báo yếu hay mạnh.
 
-Các tỷ lệ này là giả thuyết ban đầu cần đánh giá, không phải các giá trị tối ưu đã được chứng minh. Việc phân nhóm không dùng số hiệu instance và không tra kết quả biết trước. Cả hai ngưỡng phân nhóm nằm trong trường `routing` của `benchmarks/ahs_policy.json`; mọi lần chạy ghi lại config hash và các ngưỡng vào manifest.
+Log cũ vẫn cho hai tín hiệu hữu ích về HCup. Trong 33 lượt HFP, 23 lượt chưa tạo
+được model hoàn chỉnh; 10 lượt đã tạo ít nhất một model nhưng chưa tìm được tour.
+Riêng `graph761` tạo 1.420 model và báo 2.892 blocking clause trước timeout. Điều
+này cho thấy HFP có hoạt động nhưng không hội tụ trong phần ngân sách 10--30% đã
+được cấp. Lần chạy cũ cũng chưa thử HCup outside. Vì vậy `residual_v1` đưa outside
+lên trước và cấp toàn bộ core-33 cho hai HCup mode bổ sung; đây là thay đổi cần
+đo, không phải tuyên bố rằng tỷ lệ mới đã tối ưu.
 
-## 3. Ngân sách thời gian
+## 3. Các backend đang chạy
 
-Mỗi stage nhận một **deadline tích lũy**. Ví dụ, lộ trình 80%–20% với ngân sách dùng cho backend là 100 giây:
+| Backend | Vai trò | Điều kiện chấp nhận |
+|---|---|---|
+| `cegar_sinz_2loop_2opt3` | CEGAR CNF chuẩn, exact-one Sinz, vá cycle bằng 2-opt | Tour qua verifier độc lập |
+| `hcup_outside_mergecutset` | CEGAR của HCup với merge-cutset | Tour qua verifier độc lập |
+| `hcup_hfp_preventsubcycle` | IPASIR-UP ngăn subtour ngay khi SAT đang tìm kiếm | Tour qua verifier độc lập |
 
-- stage 1 có deadline ở giây 80;
-- stage 2 có deadline ở giây 100.
+Các backend dùng cùng giới hạn một luồng qua biến môi trường do controller đặt.
+Build time không tính vào ngân sách giải.
 
-Nếu stage 1 kết thúc sớm ở giây 30 nhưng chưa giải được, stage 2 được dùng phần còn lại đến giây 100. Vì vậy thời gian chưa dùng không bị mất. Nếu stage 1 tìm được nghiệm hợp lệ, AHS dừng ngay.
+## 4. Hai policy cần phân biệt
 
-Mặc định AHS giữ lại 2 giây để dừng tiến trình, kiểm tra tour và ghi artifact. Thời gian đọc đặc trưng và điều phối được tính trong ngân sách; chỉ thời gian biên dịch backend nằm ngoài ngân sách giải.
+### `rule_v2`: policy tổng quát
 
-## 4. Cài đặt và build chạy được sau khi clone
+Đây là mặc định khi giải một instance chưa biết. Route chỉ phụ thuộc vào mật độ
+`m/n` và tỷ lệ đỉnh bậc 2.
 
-Cần cài Git, Python 3, Rust/Cargo, CMake và một C/C++ compiler. Từ thư mục `HCP/`, chạy:
+| Nhóm graph | Thứ tự và tỷ lệ ngân sách |
+|---|---|
+| dense | HCup outside 50%, CEGAR Sinz 35%, HCup HFP 15% |
+| sparse, nhiều đỉnh bậc 2 | CEGAR Sinz 40%, HCup outside 30%, HCup HFP 30% |
+| sparse khác | CEGAR Sinz 45%, HCup outside 35%, HCup HFP 20% |
+
+Các tỷ lệ này là giả thuyết kỹ thuật ban đầu, chưa phải kết luận thực nghiệm.
+Muốn công bố chúng cần ablation cùng máy, cùng timeout và nhiều seed/order khi
+backend có yếu tố không tất định.
+
+### `residual_v1`: policy cho tập đã biết CEGAR không giải được
+
+Core 33 được tạo từ những instance mà CEGAR trước đó đã bỏ sót. Chạy lại CEGAR
+trên chính tập dư này chỉ lặp lại chi phí đã biết. `residual_v1` vì thế chỉ chạy:
+
+- HCup outside: 60--65% ngân sách;
+- HCup HFP: 35--40% ngân sách.
+
+Policy này dùng để tìm coverage bổ sung trên core 33. Không được báo cáo nó như
+policy tổng quát cho toàn bộ FHCP.
+
+## 5. Cài đặt và kiểm tra bắt buộc
+
+Từ thư mục gốc repository:
 
 ```bash
 ./setup_dependencies.sh
 ./setup_dependencies.sh --check
 ```
 
-Script clone đúng commit public đã khóa vào `external/hcup` và `external/SAT_HCP`, tạo `.venv`, cài PySAT rồi build CEGAR/HCup. `external/` và `.venv/` không được commit. Script dừng nếu gặp checkout ngoài bị sửa, nên không ghi đè công việc local.
+Lệnh `--check` không chỉ kiểm tra file tồn tại. Nó chạy cả ba backend mặc định
+trên `graph1.col`, đọc tour và xác minh từng cạnh. Nếu smoke test này thất bại thì
+không nên chạy benchmark dài.
 
-Nếu máy chỉ cần chạy CRE hoặc chưa cài Rust/Cargo:
+## 6. Lệnh chạy
 
-```bash
-./setup_dependencies.sh --no-build
-```
-
-Hai nguồn public được dùng là:
-
-- `https://github.com/kieuvantuyen01/Hcup`;
-- `https://github.com/kieuvantuyen01/SAT_HCP`, nhánh nguồn CRE đã kiểm chứng.
-
-Sau khi setup đầy đủ, thêm `--no-build` vào lệnh giải để không build lại.
-
-## 5. Chạy một instance
-
-Xem trước lộ trình mà không cần binary:
+Giải một graph chưa biết bằng policy tổng quát:
 
 ```bash
 ./run_ahs.sh \
   --input FHCPCS-col/graph950.col \
-  --policy rule_v1 \
+  --policy rule_v2 \
+  --timeout 1800 \
+  --no-build
+```
+
+Xem route mà không chạy solver:
+
+```bash
+./run_ahs.sh \
+  --input FHCPCS-col/graph950.col \
+  --policy rule_v2 \
   --timeout 1800 \
   --dry-run
 ```
 
-Chạy thật trong ngân sách tổng 1.800 giây:
-
-```bash
-./run_ahs.sh \
-  --input FHCPCS-col/graph950.col \
-  --policy rule_v1 \
-  --timeout 1800 \
-  --output-tour graph950.ahs.tour \
-  --no-build
-```
-
-Các policy kiểm soát có sẵn:
-
-- `cegar_only`: chỉ chạy CEGAR;
-- `hcup_only`: chỉ chạy HCup-HFP;
-- `rule_v1`: lộ trình hai stage mặc định;
-- `exploratory_v1`: thêm HCup không propagator ở stage thứ ba; chỉ dùng trong thí nghiệm có nhãn rõ.
-
-## 6. Chạy tập 33 instance còn mở
-
-Lệnh sau build backend một lần rồi chạy `historical_open_33`:
+Chạy core 33 với policy residual:
 
 ```bash
 ./run_ahs_benchmark.sh \
   --timeout 1800 \
-  --output benchmark-runs/ahs-open33-1800s
+  --output benchmark-runs/ahs-residual33-v1-1800s
 ```
 
-Muốn chạy nền và có thể tiếp tục sau khi gián đoạn:
+Với 33 instance chạy tuần tự, cap 1.800 giây có trần khoảng 16,5 giờ; cap 3.600
+giây có trần khoảng 33 giờ, chưa tính thời gian setup. Instance giải sớm sẽ làm
+tổng thời gian ngắn hơn.
+
+Để đóng terminal và quay lại xem sau:
 
 ```bash
 nohup ./run_ahs_benchmark.sh \
   --timeout 1800 \
-  --output benchmark-runs/ahs-open33-1800s \
+  --output benchmark-runs/ahs-residual33-v1-1800s \
   --resume \
-  > ahs-open33-1800s.console.log 2>&1 &
+  > ahs-residual33-v1-1800s.console.log 2>&1 &
 ```
 
-Tổng giới hạn trên là khoảng 16,5 giờ cho 33 instance ở 1.800 giây/instance; các instance giải sớm làm thời gian thực tế ngắn hơn. Grace 5 giây của benchmark runner chỉ dành cho AHS đóng tiến trình và ghi kết quả, không tăng ngân sách giải bên trong.
+Nếu máy bị ngắt, chạy lại đúng lệnh có `--resume`; runner chỉ bỏ qua record đã
+hoàn tất trong `results.jsonl`.
 
-## 7. Kết quả và kiểm tra
+Không dùng `--resume` với thư mục `ahs-open33-1800s` cũ: manifest của lần chạy
+đó thuộc policy/backend lỗi. Hãy dùng một thư mục output mới như ví dụ trên.
 
-Mỗi lần giải trực tiếp tạo một thư mục trong `ahs-runs/` gồm:
+## 7. Cách đọc kết quả
 
-- `manifest.json`: graph hash, config hash, binary hash, policy, route và môi trường;
+Mỗi lần chạy đơn tạo một thư mục trong `ahs-runs/`, gồm:
+
+- `manifest.json`: graph, hash source/binary/config, policy và môi trường;
+- `summary.json`: trạng thái cuối, backend thắng, thời gian và từng stage;
 - `raw/`: stdout/stderr nguyên gốc của từng backend;
-- `summary.json`: kết quả từng stage, lý do chuyển stage, telemetry backend và kết quả cuối;
-- `solution.tour`: chỉ có khi một tour đã vượt qua bộ kiểm tra độc lập.
+- `solution.tour`: chỉ xuất hiện khi tour đã được xác minh.
 
-Benchmark nhiều instance tiếp tục ghi `manifest.json`, `results.jsonl`, raw log và tour trong `benchmark-runs/`. Artifact nội bộ của mỗi lần AHS nằm trong `artifacts/<variant>/graphN-rR/` của chính benchmark run, nên có thể chép cả thư mục kết quả sang máy khác mà không mất provenance. Nếu tiếp tục một task từng bị ngắt trước khi ghi JSONL, runner giữ artifact cũ và tạo hậu tố `-attempt2`, `-attempt3`, v.v.; nó không dùng nhầm tour còn sót lại.
+Ba trường cần đọc cùng nhau:
 
-Quy tắc trạng thái cuối:
+- `status`: `SATISFIABLE`, `UNSATISFIABLE`, `UNKNOWN` hoặc `ERROR`;
+- `route_exhausted`: mọi stage đã kết thúc mà chưa có kết luận;
+- `budget_exhausted`: stage cuối chạm deadline tổng. Cả hai trường này đều không
+  có nghĩa graph vô nghiệm.
 
-- SAT + tour hợp lệ: `s SATISFIABLE`, mã thoát 10;
-- UNSAT từ backend được khai báo tin cậy: `s UNSATISFIABLE`, mã thoát 20;
-- hết giờ hoặc không có kết luận: `s UNKNOWN`, mã thoát 0;
-- backend báo SAT nhưng tour sai, hoặc lỗi cứng không được backend sau khắc phục: `s ERROR`, mã thoát 1.
+Với benchmark nhiều instance, `results.jsonl` chứa một record cho từng cặp
+instance--variant. Mỗi kết quả SAT vẫn có `verified=true`; nếu không, runner đổi
+trạng thái thành `INVALID_SAT`.
 
-Chạy test bằng:
+## 8. Phần chưa được tích hợp
 
-```bash
-python3 tools/test_ahs_solver.py
-python3 tools/test_hybrid_coverage.py
-```
+AHS v1 chưa chuyển learned clause hay cut giữa các backend. SAT repair, CRE--CEGAR
+và wrapper Cardinality-CDCL lịch sử cũng chưa thuộc policy mặc định. Chúng chỉ nên
+được thêm sau khi có:
 
-## 8. Những gì chưa được cài đặt
+1. kiểm thử đúng/sai trên tập nhỏ có đáp án độc lập;
+2. timeout cứng và kiểm soát một luồng;
+3. ablation cho thấy có unique win hoặc giảm thời gian có ý nghĩa;
+4. log đủ để chỉ ra cơ chế nào tạo ra lợi ích.
 
-Ba thành phần sau bị tắt có chủ ý và được ghi trong manifest:
-
-- truyền cut/learned clause giữa CEGAR và HCup;
-- SAT-repair trong policy AHS;
-- CRE-CEGAR trong policy AHS mặc định.
-
-`cegar-fix` đã có prototype `parallel_sub_hcp`, nhưng chưa bảo đảm một core, hard timeout cho từng subsolver và chưa có ablation B2a/control. CRE đã có chế độ `--cegar` thử nghiệm và một benchmark variant riêng, nhưng chưa qua exhaustive test đủ rộng hoặc chứng minh marginal gain. Vì vậy hai prototype vẫn bị loại khỏi policy AHS mặc định; chúng phải được báo cáo thành ablation riêng.
-
-## 9. Các thí nghiệm khoanh vùng mới
-
-Chạy HFP trên đúng 44 timeout của cấu hình CEGAR-957:
-
-```bash
-python3 tools/hcp_benchmark.py \
-  --config benchmarks/hybrid_variants.json \
-  --set cegar957_timeout_44 \
-  --variants hcup_hfp_preventsubcycle \
-  --output benchmark-runs/hfp-cegar957-timeout44
-```
-
-Để đo overlap đầy đủ trên core-33, chạy cả hai HCup variant và không dùng `--stop-on-solved`:
-
-```bash
-python3 tools/hcp_benchmark.py \
-  --config benchmarks/hybrid_variants.json \
-  --set historical_open_33 \
-  --variants hcup_outside_mergecutset,hcup_hfp_preventsubcycle \
-  --output benchmark-runs/hcup-open33-overlap
-```
-
-CRE--CEGAR được giữ ngoài mặc định nhưng có thể chạy qua cùng external timeout và verifier. Wrapper kiểm tra `.venv` và source đã khóa trước khi chạy:
-
-```bash
-./run_cre_benchmark.sh \
-  --set historical_open_33 \
-  --timeout 1800 \
-  --output benchmark-runs/cre-cegar-m420-open33
-```
+Do đó bước benchmark tiếp theo có mục tiêu cụ thể: đo xem HCup outside và HFP có
+giải thêm instance nào trong core 33. Nếu vẫn không có coverage mới, dữ liệu
+activity trong `stage_results[].backend_activity` được dùng để phân biệt solver
+đang tiến triển chậm, lặp model/subtour, hay gần như không backtrack. Khi đó mới
+chọn đúng chỗ để tối ưu tiếp thay vì chỉ tăng timeout.

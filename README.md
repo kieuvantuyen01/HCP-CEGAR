@@ -63,15 +63,29 @@ python3 tools/hcp_benchmark.py --set regression_core --timeout 1800
 
 The runner records an immutable manifest, JSONL results, raw logs, feature telemetry, and independently verifies every SAT tour. See [`docs/reproducible-benchmark.md`](docs/reproducible-benchmark.md).
 
-### Adaptive Hybrid SAT-HCP (AHS v0)
+### Adaptive Hybrid SAT-HCP (AHS v1)
 
-AHS v0 runs the strongest replayed CEGAR configuration and HCup-HFP under one total budget. It routes only from reproducible graph features and accepts SAT only after independent tour verification. The current controller is deterministic and rule-based: it does not train, load, or require a machine-learning model.
+AHS v1 runs three portable backends under one total budget: Sinz-CNF CEGAR,
+HCup outside merge-cutset, and HCup HFP prevent-subcycle. It routes only from
+reproducible graph features and accepts SAT only after independent tour
+verification. The controller is deterministic and rule-based: it does not
+train, load, or require a machine-learning model.
+
+The former Cardinality-CDCL replay is disabled. Its compatibility wrapper passed
+a custom cardinality command stream to the ordinary CaDiCaL clause API, so it
+was not a valid encoding of the published method. The command
+`./setup_dependencies.sh --check` now performs a semantic smoke test of every
+backend used by the default policy before a long run starts.
 
 ```bash
 ./run_ahs.sh --build-only
-./run_ahs.sh --input FHCPCS-col/graph950.col --timeout 1800 --no-build
-./run_ahs_benchmark.sh --timeout 1800 --output benchmark-runs/ahs-open33-1800s
+./run_ahs.sh --input FHCPCS-col/graph950.col --policy rule_v2 --timeout 1800 --no-build
+./run_ahs_benchmark.sh --timeout 1800 --output benchmark-runs/ahs-residual33-v1-1800s
 ```
+
+The single-instance command uses the general `rule_v2` policy. The core-33
+script intentionally uses `residual_v1`, because those instances were selected
+after an earlier CEGAR miss; it must not be reported as the full-dataset policy.
 
 Implementation details, artifacts, policy fractions, and current limitations are documented in [`docs/ahs-implementation.md`](docs/ahs-implementation.md).
 

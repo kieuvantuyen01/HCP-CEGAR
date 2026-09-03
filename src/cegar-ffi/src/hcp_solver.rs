@@ -29,12 +29,12 @@ pub fn solve_hamilton(g:Graph, _s:i32, block_method: i32,symmetry: i32 ,opt:i32,
         let (increment,block) = cegar(&mut encoder,solver,0,0, g,block_method, opt, three_opt, instant,instant.elapsed());
         Solver_delete(solver);
         println!("overall incremented number = {}",increment);
-        // println!("overall number of added block clauses = {}",block);
+        println!("overall number of added block clauses = {}",block);
     }
     
 }
 
-fn cegar(encoder: &mut Encoder,solver:*mut Solver,mut count: i32,block_count:i32, g:Graph,block_method: i32, opt:i32, three_opt: i32, instant:Instant,previous_time:Duration) ->(i32,i32) {
+fn cegar(encoder: &mut Encoder,solver:*mut Solver,mut count: i32,mut block_count:i32, g:Graph,block_method: i32, opt:i32, three_opt: i32, instant:Instant,previous_time:Duration) ->(i32,i32) {
     //SATソルバーで解を求める
     unsafe{
         let res = Solver_solve(solver);
@@ -50,6 +50,11 @@ fn cegar(encoder: &mut Encoder,solver:*mut Solver,mut count: i32,block_count:i32
         if res == 10{
             //どの辺が選択されたかの解析
             let sol_arcs = get_solution_arcs(solver,&encoder.graph_lit_map);
+            if let Err(reason) = validate_cycle_cover_arcs(&sol_arcs, &g) {
+                println!("c cegar_error=invalid_cycle_cover reason={}", reason);
+                println!("s ERROR");
+                return (count, block_count);
+            }
             //閉路
             let sol_cycles = get_solution_cycles(sol_arcs);
             //閉路が一つであれば、ハミルトン閉路なので解を出力
@@ -66,16 +71,17 @@ fn cegar(encoder: &mut Encoder,solver:*mut Solver,mut count: i32,block_count:i32
                 println!("sat solution cycle lengths map (length:number) = {:?}",map_cycle_lengths(&sol_cycles));
             //閉路が二つ以上であれば、ソルバーにブロック節を加えて、もう一度解を求める
                 if opt == 0{
-                    get_blocking_clauses(&sol_cycles,solver,encoder,&g,block_method);
+                    block_count += get_blocking_clauses(&sol_cycles,solver,encoder,&g,block_method);
                 }else if opt >= 1{
-                    let cycles = two_opt(&sol_cycles,solver,encoder,&g,block_method,opt,three_opt);
+                    let (cycles, added_clauses) = two_opt(&sol_cycles,solver,encoder,&g,block_method,opt,three_opt);
+                    block_count += added_clauses;
                     if cycles.len() == 1{
                         let flat: Vec<i32> = cycles.into_iter().flatten().collect();
                         let line = flat.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(" ");
                         let now = instant.elapsed();
                         let time = now-previous_time;
                         let add_block_clauses_time = now-previous_time-sat_solving_time;
-                        // println!("number of added block clauses = {}",block_count);
+                        println!("number of added block clauses = {}",block_count);
                         println!("add block clauses time = {:?}",add_block_clauses_time);
                         println!("increment time = {:?}", time);
                         println!();
@@ -88,8 +94,6 @@ fn cegar(encoder: &mut Encoder,solver:*mut Solver,mut count: i32,block_count:i32
                 }else{
                     panic!("2-opt option \n-t 0:2-opt off\n-t 1,2,3:2-opt on");
                 };
-                // block_count += block_clauses.len() as i32;
-                // cnf.extend(block_clauses);
                 count += 1;
 
 
@@ -114,6 +118,27 @@ fn get_solution_arcs(solver:*mut Solver,lit_map:&BTreeMap<(i32,i32),Lit>) -> Vec
         let sol_arcs: Vec<(i32,i32)> = lit_map.iter().filter_map(|((u,v), lit)| if Solver_val(solver, lit.var()) > 0 { Some((*u,*v)) } else { None }).collect();
         sol_arcs
     }
+}
+
+fn validate_cycle_cover_arcs(sol_arcs: &[(i32, i32)], g: &Graph) -> Result<(), String> {
+    let expected = g.adjacency_list.len();
+    if sol_arcs.len() != expected {
+        return Err(format!("selected_arcs_{}_expected_{}", sol_arcs.len(), expected));
+    }
+    let mut incoming: HashMap<i32, usize> = HashMap::new();
+    let mut outgoing: HashMap<i32, usize> = HashMap::new();
+    for &(u, v) in sol_arcs {
+        *outgoing.entry(u).or_insert(0) += 1;
+        *incoming.entry(v).or_insert(0) += 1;
+    }
+    for vertex in g.adjacency_list.keys() {
+        let out = outgoing.get(vertex).copied().unwrap_or(0);
+        let input = incoming.get(vertex).copied().unwrap_or(0);
+        if out != 1 || input != 1 {
+            return Err(format!("vertex_{}_out_{}_in_{}", vertex, out, input));
+        }
+    }
+    Ok(())
 }
 
 fn get_solution_cycles(sol_arcs: Vec<(i32, i32)>) -> Vec<Vec<i32>> {
@@ -151,8 +176,8 @@ fn get_solution_cycles(sol_arcs: Vec<(i32, i32)>) -> Vec<Vec<i32>> {
 
 //2-optアルゴリズム
 //ブロック節と、つながって新たに見つかった閉路を返す
-fn two_opt(sol_cycles:&Vec<Vec<i32>>,solver:*mut Solver,encoder: &mut Encoder,g:&Graph,block_method:i32,opt:i32,three_opt:i32) -> Vec<Vec<i32>>{
-    // let mut block_clauses = Vec::new();
+fn two_opt(sol_cycles:&Vec<Vec<i32>>,solver:*mut Solver,encoder: &mut Encoder,g:&Graph,block_method:i32,opt:i32,three_opt:i32) -> (Vec<Vec<i32>>, i32){
+    let mut block_count = 0;
     let mut cycles = sol_cycles.to_vec();
     let mut merged = true;
     let mut maximam_cycles = Vec::new();
@@ -162,7 +187,7 @@ fn two_opt(sol_cycles:&Vec<Vec<i32>>,solver:*mut Solver,encoder: &mut Encoder,g:
 
     if opt !=3{
         // block_clauses.extend(get_blocking_clauses(&sol_cycles,solver,encoder,&g,block_method));
-        get_blocking_clauses(&sol_cycles,solver,encoder,&g,block_method);
+        block_count += get_blocking_clauses(&sol_cycles,solver,encoder,&g,block_method);
     // }else if block_method >= 10{
     //     let subclauses = get_blocking_clauses(&sol_cycles,solver,encoder,&g,block_method+100);
     //     if subclauses.len() != 0{
@@ -206,7 +231,7 @@ fn two_opt(sol_cycles:&Vec<Vec<i32>>,solver:*mut Solver,encoder: &mut Encoder,g:
                 merged = true; // reset loop — re-try 2-opt on the new cycle set
                 cache_vertex.clear(); // reset 2-opt cache for fresh attempt
                 if opt == 1 || opt == 4 {
-                    get_blocking_clauses(&vec!(three_cycle.clone()), solver, encoder, g, block_method);
+                    block_count += get_blocking_clauses(&vec!(three_cycle.clone()), solver, encoder, g, block_method);
                 } else {
                     maximam_cycles = three_cycle;
                 }
@@ -219,24 +244,24 @@ fn two_opt(sol_cycles:&Vec<Vec<i32>>,solver:*mut Solver,encoder: &mut Encoder,g:
         }
 
         if opt == 1 || opt == 4 {
-            get_blocking_clauses(&vec!(new_cycle), solver, encoder, g, block_method);
+            block_count += get_blocking_clauses(&vec!(new_cycle), solver, encoder, g, block_method);
         } else {
             maximam_cycles = new_cycle;
         }
     }
     if opt==2 && maximam_cycles.len() != 0{
-        get_blocking_clauses(&vec!(maximam_cycles), solver, encoder, g, block_method);
+        block_count += get_blocking_clauses(&vec!(maximam_cycles), solver, encoder, g, block_method);
     }
     if opt==3{
         let active_cycles = get_active_cycles(&cycles, &active_cycles_number);
-        get_blocking_clauses(&active_cycles,solver, encoder, g, block_method);
+        block_count += get_blocking_clauses(&active_cycles,solver, encoder, g, block_method);
     }
 
     println!("number of connected cycles = {}",cycles.len()-sol_cycles.len());
     println!("number of merged cycles = {}",active_cycles_number.len());
     println!("merged cycle lengths map (length:number) = {:?}",map_cycle_lengths(&get_active_cycles(&cycles, &active_cycles_number)));
 
-    get_active_cycles(&cycles, &active_cycles_number).to_vec()    
+    (get_active_cycles(&cycles, &active_cycles_number), block_count)
 
 }
 
@@ -450,12 +475,13 @@ fn cycle_join_three(
     Some(new_cycle)
 }
 
-fn get_blocking_clauses(sol_cycles:&Vec<Vec<i32>>,solver:*mut Solver,encoder: &mut Encoder,g:&Graph, block_method:i32){
+fn get_blocking_clauses(sol_cycles:&Vec<Vec<i32>>,solver:*mut Solver,encoder: &mut Encoder,g:&Graph, block_method:i32) -> i32 {
 
     // let mut cut_arcs_map = BTreeMap::new();
 
+    let mut count = 0;
     for sol_cycle in sol_cycles.iter(){
-        match block_method{
+        count += match block_method{
             0 => cegar_blocking_clauses(&sol_cycle,solver,&encoder.graph_lit_map),
             1 => asp_blocking_clauses(&sol_cycle,solver,encoder,&g,1),//閉路から出ていく辺と閉路へと入っていく辺両方を同じ節へ追加する
             // 2 => [cegar_blocking_clauses(&sol_cycle.clone(),solver,&encoder.graph_lit_map.clone()),asp_blocking_clauses(sol_cycle,encoder,&g,1)].concat(),//既存ブロック節を追加し、閉路から出ていく辺と閉路へと入っていく辺両方を同じ節へ追加する
@@ -570,10 +596,10 @@ fn get_blocking_clauses(sol_cycles:&Vec<Vec<i32>>,solver:*mut Solver,encoder: &m
     //     };
     // clauses
 
-    
+    count
 }
 
-fn cegar_blocking_clauses(cycle:&Vec<i32>,solver:*mut Solver,lit_map:&BTreeMap<(i32,i32),Lit>){
+fn cegar_blocking_clauses(cycle:&Vec<i32>,solver:*mut Solver,lit_map:&BTreeMap<(i32,i32),Lit>) -> i32 {
     // let mut clauses =  Vec::new();
     // for cycle in sol_cycles.iter() {
     let len = cycle.len();
@@ -594,12 +620,13 @@ fn cegar_blocking_clauses(cycle:&Vec<i32>,solver:*mut Solver,lit_map:&BTreeMap<(
             lits2.push(*lit);
         }
         Encoder::at_most_n(solver, &lits2, (lits2.len()-1) as i32);
+        2
+    } else {
+        1
     }
-    // }
-
 }
 
-fn asp_blocking_clauses(cycle:&Vec<i32>,solver:*mut Solver,encoder: &mut Encoder,g:&Graph, method: i32){
+fn asp_blocking_clauses(cycle:&Vec<i32>,solver:*mut Solver,encoder: &mut Encoder,g:&Graph, method: i32) -> i32 {
     // let mut clauses = Vec::new();
     // if method != 4{
         // for cycle in sol_cycles {
@@ -637,6 +664,9 @@ fn asp_blocking_clauses(cycle:&Vec<i32>,solver:*mut Solver,encoder: &mut Encoder
             Encoder::at_least_n(solver, &lits1, 1);
             if lits2.len() != 0{
                 Encoder::at_least_n(solver, &lits2, 1);
+                2
+            } else {
+                1
             }
         // }else if balanced == 1 {
         //     let lits1:Vec<Lit> = clause1.iter().cloned().collect();
@@ -684,7 +714,7 @@ fn asp_blocking_clauses(cycle:&Vec<i32>,solver:*mut Solver,encoder: &mut Encoder
     //         clauses.push(clause2);
     //     }
     //     // }
-    // }
+        // }
 }
 
 fn get_active_cycles(cycles: &Vec<Vec<i32>>, active_cycles_number: &Vec<usize>) -> Vec<Vec<i32>> {
@@ -717,6 +747,4 @@ extern "C" {
     fn Solver_solve(solver: *mut Solver) -> c_int;
     fn Solver_val(solver: *mut Solver, lit: c_int) -> c_int;
     // fn Solver_failed(solver: *mut Solver, lit: c_int) -> c_int;
-    pub fn Solver_CARadd(solver: *mut Solver, lit: c_int, encoding: bool);
 }
-

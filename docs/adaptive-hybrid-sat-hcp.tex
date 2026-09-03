@@ -439,8 +439,8 @@ Nguồn & Kỹ thuật đáng học & Cách đưa vào phương pháp chung \\
 \endhead
 CEGAR cũ & Incremental SAT và subtour elimination. & Là backbone bảo đảm tính đúng và tính đầy đủ. \\
 CEGAR cut-set & Cut-set mạnh hơn blocking một cycle cụ thể; 2-loop, symmetry và 2-opt. & Dùng làm phase khởi đầu nhanh và làm ngôn ngữ chung cho cut pool. \\
-CCaDical variants & Một cấu hình đơn đạt coverage rất cao. & Backend mặc định; không nên thay thế trước khi có bằng chứng paired. \\
-Sinz variants & Có các unique win so với CCaDical. & Encoding thay thế khi telemetry cho thấy phase đầu bị hardening. \\
+CCaDical variants & Kết quả lịch sử báo cáo coverage rất cao. & Giữ làm mốc công bố; chưa có executable replay hợp lệ trong repository sau khi wrapper cardinality bị phát hiện sai giao thức. \\
+Sinz variants & Có các unique win so với CCaDical và dùng CNF chuẩn. & Là CEGAR portable đang chạy; mọi so sánh với CCaDical phải ghi rõ đây không phải cùng encoding. \\
 HCup outside-mergecutset & Áp dụng 2-opt exhaustively trước khi sinh cut-set và giữ inprocessing của CaDiCaL. & Là baseline CEGAR mạnh cần chạy cùng điều kiện trước khi chọn làm Phase A. \\
 HCup HFP & Prevent-subcycle can thiệp trên assignment chưa hoàn chỉnh; cấu hình đơn giải 917 graph. & Candidate cho Phase C; phải đo unique win trên 44 timeout của cấu hình CEGAR-957. \\
 HCup inside-mergecutset & Kiểm tra model hoàn chỉnh bên trong một lần gọi SAT và giữ assignment trail; giải 871 graph. & Phân biệt với HFP: ``inside'' không có nghĩa là phát hiện subcycle trên assignment chưa hoàn chỉnh. \\
@@ -503,22 +503,26 @@ Ta gọi phương pháp là \textbf{Adaptive Hybrid SAT-HCP}, viết tắt \text
   \draw[arrow,bend left=15] (pool) to (controller);
   \draw[arrow] (pool)--(verify);
 \end{tikzpicture}}
-\caption{Các backend không hoạt động độc lập: chúng trao đổi tri thức qua cut pool và được điều phối bởi một controller duy nhất.}
+\caption{Kiến trúc đích: các backend trao đổi tri thức qua cut pool và được điều phối bởi một controller duy nhất.}
 \label{fig:architecture}
 \end{figure}
 
 \clearpage
 \begin{warningbox}[Trạng thái cài đặt]
-AHS v0 đã có driver cố định để chọn lộ trình từ đặc trưng graph, chia một ngân sách tổng cho CEGAR và HCup, dừng tiến trình con khi hết giờ, kiểm chứng tour độc lập và lưu manifest/raw log/summary. Driver cũng thu các metric máy đọc được do backend phát ra. Đây vẫn là tích hợp ở mức tiến trình; hai backend chưa trao đổi cut hoặc SAT state. \code{cegar-fix} có prototype sub-HCP repair và CRE có prototype \code{--cegar}, nhưng GraphCutPool, Phase B và CRE--CEGAR chưa được nối vào policy mặc định. Vì vậy sơ đồ trên tiếp tục là kiến trúc đích; phần đang chạy như AHS là controller, Phase A/Phase C tuần tự và verifier.
+AHS v1 đã có driver cố định để chọn lộ trình từ đặc trưng graph, chia một ngân sách tổng cho ba backend portable, dừng tiến trình con khi hết giờ, kiểm chứng tour độc lập và lưu manifest/raw log/summary. Ba backend hiện tại là CEGAR--Sinz trong \code{cegar-fix}, HCup \code{outside-mergecutset} và HCup \code{hfp-preventsubcycle}. Đây vẫn là tích hợp ở mức tiến trình; các backend chưa trao đổi cut hoặc SAT state. \code{cegar-fix} có prototype sub-HCP repair và CRE có prototype \code{--cegar}, nhưng GraphCutPool, Phase B và CRE--CEGAR chưa được nối vào policy mặc định. Vì vậy sơ đồ trên là kiến trúc đích; phần đang chạy là controller tuần tự và verifier chung.
 \end{warningbox}
 
 \begin{resultbox}[Không có học máy trong source hiện tại]
-Controller AHS v0 là một bộ luật tất định. Nó chỉ dùng $m/n$ và tỷ lệ đỉnh bậc 2 để chọn route; không train, không nạp model và không cần thư viện machine learning. Tệp policy ghi rõ \code{type=fixed\_rules} và \code{uses\_machine\_learning=false}; driver từ chối config vi phạm hai điều này.
+Controller AHS v1 là một bộ luật tất định. Nó chỉ dùng $m/n$ và tỷ lệ đỉnh bậc 2 để chọn route; không train, không nạp model và không cần thư viện machine learning. Tệp policy ghi rõ \code{type=fixed\_rules} và \code{uses\_machine\_learning=false}; driver từ chối config vi phạm hai điều này.
 \end{resultbox}
+
+\begin{warningbox}[Sửa sai backend replay]
+Lần chạy 33 graph trước dùng \code{cegar-ffi} với một wrapper chuyển luồng lệnh cardinality riêng sang API thêm clause CNF thông thường. Hai giao thức không tương đương, nên ràng buộc exactly-one của lần chạy đó không hợp lệ. AHS v1 loại backend này khỏi policy, dùng Sinz CNF chuẩn và chạy smoke test có verifier trước benchmark dài. Kết quả \code{UNKNOWN} cũ chỉ dùng để chẩn đoán, không dùng để so sánh với kết quả công bố của CCaDical.
+\end{warningbox}
 
 \section{Phase A: CEGAR có inprocessing}
 
-Phase A bắt đầu bằng cấu hình SAT-CEGAR mạnh nhất đã biết. CaDiCaL được phép dùng inprocessing để rút gọn công thức và cấu trúc tìm kiếm.
+Phase A hiện có hai CEGAR portable. Lựa chọn thứ nhất là \code{cegar-fix} với Sinz CNF. Lựa chọn thứ hai là HCup chạy stage \code{outside} và blocking \code{merge-cutset}. CaDiCaL được phép dùng inprocessing để rút gọn công thức và cấu trúc tìm kiếm.
 
 Mỗi cycle cover được xử lý theo thứ tự:
 
@@ -529,7 +533,7 @@ Mỗi cycle cover được xử lý theo thứ tự:
   \item ghi telemetry rồi gọi SAT tiếp.
 \end{enumerate}
 
-HCup \code{outside-mergecutset} áp dụng 2-opt exhaustively rồi mới sinh cut-set cho các component còn lại. Cấu hình CEGAR-957 dùng tùy chọn 2-opt riêng của code hiện tại. Hai cách này phải được báo cáo thành hai cấu hình khác nhau cho đến khi một ablation trực tiếp cho thấy có thể thay thế lẫn nhau.
+HCup \code{outside-mergecutset} áp dụng 2-opt exhaustively rồi mới sinh cut-set cho các component còn lại. \code{cegar-fix} dùng tùy chọn 2-opt riêng. Hai cách này phải được báo cáo thành hai cấu hình khác nhau cho đến khi một ablation trực tiếp cho thấy có thể thay thế lẫn nhau.
 
 \section{Phase B: SAT-guided repair}
 
@@ -919,7 +923,7 @@ Làm cứng prototype SAT-guided repair trước khi nối vào pipeline:
 Có hai mức tích hợp:
 
 \begin{description}
-  \item[Mức thực nghiệm nhanh.] AHS v0 đã có driver cố định điều phối hai binary trong một ngân sách tổng và kiểm chứng tour. Bước kế tiếp của mức này là bổ sung file cut/cycle-cover chung sau khi hai CLI có giao diện export/import tương thích.
+  \item[Mức thực nghiệm nhanh.] AHS v1 đã có driver cố định điều phối ba backend trong một ngân sách tổng và kiểm chứng tour. Bước kế tiếp của mức này là bổ sung file cut/cycle-cover chung sau khi các CLI có giao diện export/import tương thích.
   \item[Mức phương pháp hoàn chỉnh.] Port prevent-subcycle hoặc đóng gói HCup thành library có API ổn định. Khi đó controller, cut pool và verifier nằm trong một executable.
 \end{description}
 
