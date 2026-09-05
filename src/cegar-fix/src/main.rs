@@ -14,6 +14,7 @@ pub mod modular_tree;
 mod options;
 mod parallel_sub_hcp;
 mod patching;
+mod population_patcher;
 pub mod stem_cycle_patcher;
 pub mod two_tier_decomposer;
 pub mod pinpointed_strip_solver;
@@ -74,6 +75,7 @@ fn main() {
         chained_lk: feature_enabled(&matches, "chained-lk", true),
         ils_patcher: feature_enabled(&matches, "ils-patcher", true),
         macro_patcher: feature_enabled(&matches, "macro-patcher", true),
+        population_patcher: feature_enabled(&matches, "population-patcher", false),
         telemetry: feature_enabled(&matches, "telemetry", false),
     };
     // solver,encodingのオプションを&strで受け取る

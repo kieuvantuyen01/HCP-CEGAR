@@ -59,6 +59,28 @@
       "supports_run_dir": true,
       "external_timeout_grace_sec": 5,
       "options": {"--policy": "cegar_only", "--no-build": true}
+    },
+    {
+      "name": "ahs_population_cegar_only",
+      "source_dir": ".",
+      "binary": "tools/ahs_solver.py",
+      "build_system": "none",
+      "supports_output_tour": true,
+      "supports_internal_timeout": true,
+      "supports_run_dir": true,
+      "external_timeout_grace_sec": 5,
+      "options": {"--policy": "population_cegar_only", "--no-build": true}
+    },
+    {
+      "name": "ahs_residual_memetic_v1",
+      "source_dir": ".",
+      "binary": "tools/ahs_solver.py",
+      "build_system": "none",
+      "supports_output_tour": true,
+      "supports_internal_timeout": true,
+      "supports_run_dir": true,
+      "external_timeout_grace_sec": 5,
+      "options": {"--policy": "residual_memetic_v1", "--no-build": true}
     }
   ]
 }

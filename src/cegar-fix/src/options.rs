@@ -255,6 +255,10 @@ pub fn get_options() -> clap::ArgMatches {
         .arg(feature_arg("chained-lk", "Run chained Lin-Kernighan patcher"))
         .arg(feature_arg("ils-patcher", "Run iterated-local-search patcher"))
         .arg(feature_arg("macro-patcher", "Run macro-graph patcher"))
+        .arg(feature_arg(
+            "population-patcher",
+            "Recombine the current SAT cover with earlier edge-distinct covers",
+        ))
         .arg(
             Arg::with_name("telemetry")
                 .long("telemetry")

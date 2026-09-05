@@ -14,6 +14,7 @@ pub mod modular_tree;
 pub mod options;
 pub mod parallel_sub_hcp;
 pub mod patching;
+pub mod population_patcher;
 pub mod stem_cycle_patcher;
 pub mod two_tier_decomposer;
 pub mod pinpointed_strip_solver;

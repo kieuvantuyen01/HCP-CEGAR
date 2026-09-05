@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 
 import ahs_solver as ahs
+import analyze_population_ablation as population_analysis
 import hcp_benchmark as runner
 
 
@@ -39,6 +40,26 @@ class AhsPolicyTests(unittest.TestCase):
         self.assertEqual(
             ahs.policy_backend_names(self.config, "residual_v1"),
             ["hcup_outside_mergecutset", "hcup_hfp_preventsubcycle"],
+        )
+
+    def test_population_ablation_changes_only_the_population_flag(self) -> None:
+        backends = ahs.backend_index(self.config)
+        baseline = backends["cegar_sinz_2loop_2opt3"]
+        treatment = backends["cegar_sinz_population_guided"]
+        baseline_options = dict(baseline["options"])
+        treatment_options = dict(treatment["options"])
+        self.assertEqual(baseline_options.pop("--population-patcher"), "0")
+        self.assertEqual(treatment_options.pop("--population-patcher"), "1")
+        self.assertEqual(treatment_options, baseline_options)
+
+    def test_residual_memetic_policy_keeps_all_three_fallbacks(self) -> None:
+        self.assertEqual(
+            ahs.policy_backend_names(self.config, "residual_memetic_v1"),
+            [
+                "cegar_sinz_population_guided",
+                "hcup_outside_mergecutset",
+                "hcup_hfp_preventsubcycle",
+            ],
         )
 
     def test_invalid_fraction_sum_is_rejected(self) -> None:
@@ -73,6 +94,13 @@ class AhsPolicyTests(unittest.TestCase):
     def test_cumulative_deadlines_allow_unused_time_to_carry_forward(self) -> None:
         stages = self.config["policies"]["rule_v2"]["routes"]["sparse_other"]
         self.assertEqual(ahs.cumulative_stage_fractions(stages), [0.45, 0.8, 1.0])
+
+    def test_internal_timeout_leaves_a_bounded_shutdown_reserve(self) -> None:
+        for timeout in (0.1, 3.0, 1800.0):
+            internal = ahs.internal_timeout_with_reserve(timeout)
+            self.assertGreater(internal, 0.0)
+            self.assertLess(internal, timeout)
+            self.assertLessEqual(timeout - internal, 1.0)
 
     def test_transition_reason_uses_only_observed_stage_status(self) -> None:
         self.assertEqual(ahs.transition_reason([]), "policy_route_start")
@@ -139,6 +167,43 @@ class AhsPolicyTests(unittest.TestCase):
         )
         self.assertEqual(result, {"policy": "rule_v2", "budget_exhausted": False})
 
+    def test_termination_reason_parser_keeps_last_reason(self) -> None:
+        self.assertEqual(
+            runner.parse_termination_reason(
+                "c reason=earlier_reason\nc reason=population_recombination_reached_the_global_deadline\n"
+            ),
+            "population_recombination_reached_the_global_deadline",
+        )
+        self.assertIsNone(runner.parse_termination_reason("s SATISFIABLE\n"))
+
+    def test_population_telemetry_is_aggregated(self) -> None:
+        stats = runner.parse_population_stats(
+            "c population iteration=0 size_before=0 size_after=1 parents_tried=0 improvements=0 "
+            "budget_exhausted=0 cooldown_skipped=0 outer_rounds=0 guided_rounds=0 chained_lk_rounds=0 round_limit_hits=0\n"
+            "c population iteration=1 size_before=1 size_after=3 parents_tried=1 improvements=2 "
+            "budget_exhausted=0 cooldown_skipped=1 outer_rounds=2 guided_rounds=3 chained_lk_rounds=1 round_limit_hits=0\n"
+            "c population iteration=2 size_before=3 size_after=3 parents_tried=2 improvements=1 "
+            "budget_exhausted=1 cooldown_skipped=0 outer_rounds=4 guided_rounds=5 chained_lk_rounds=6 round_limit_hits=2 note=ignored\n"
+        )
+        self.assertEqual(
+            stats,
+            {
+                "calls": 3,
+                "parents_tried_total": 3,
+                "improvements_total": 3,
+                "max_population_size": 3,
+                "last_population_size": 3,
+                "last_iteration": 2,
+                "budget_exhausted_calls": 1,
+                "cooldown_skipped_calls": 1,
+                "outer_rounds_total": 6,
+                "guided_rounds_total": 8,
+                "chained_lk_rounds_total": 7,
+                "round_limit_hits_total": 2,
+            },
+        )
+        self.assertIsNone(runner.parse_population_stats("s UNKNOWN\n"))
+
     def test_outer_runner_extracts_portfolio_stage_telemetry(self) -> None:
         stages = [{"backend": "cegar", "increments": 7}]
         self.assertEqual(
@@ -146,6 +211,47 @@ class AhsPolicyTests(unittest.TestCase):
         )
         self.assertIsNone(runner.extract_portfolio_stage_results({"stage_results": [1]}))
         self.assertIsNone(runner.extract_portfolio_stage_results(None))
+
+    def test_population_analysis_reads_nested_ahs_stage_telemetry(self) -> None:
+        row = {
+            "status": "UNKNOWN",
+            "timed_out": False,
+            "population_stats": None,
+            "backend_result": {"budget_exhausted": True},
+            "portfolio_stage_results": [
+                {
+                    "status": "TIMEOUT",
+                    "timed_out": True,
+                    "increments": 12,
+                    "population_stats": {
+                        "calls": 3,
+                        "parents_tried_total": 4,
+                        "improvements_total": 2,
+                        "max_population_size": 5,
+                        "budget_exhausted_calls": 1,
+                        "cooldown_skipped_calls": 7,
+                        "round_limit_hits_total": 2,
+                    },
+                    "phase_stats": {
+                        "population_recombine": {
+                            "seconds": 0.75,
+                            "cycle_reduction_total": 11,
+                        }
+                    },
+                }
+            ],
+        }
+
+        metrics = population_analysis.population_metrics(row)
+        self.assertTrue(population_analysis.reached_timeout(row))
+        self.assertEqual(population_analysis.stage_metric(row, "increments"), 12)
+        self.assertEqual(metrics["calls"], 3)
+        self.assertEqual(metrics["improvements_total"], 2)
+        self.assertEqual(metrics["max_population_size"], 5)
+        self.assertEqual(metrics["cooldown_skipped_calls"], 7)
+        self.assertEqual(metrics["cycle_reduction_total"], 11)
+        self.assertEqual(metrics["recombine_seconds"], 0.75)
+        self.assertEqual(metrics["round_limit_hits_total"], 2)
 
     def test_skipped_stage_uses_the_stable_event_schema(self) -> None:
         result = ahs.skipped_stage_result(
@@ -181,6 +287,16 @@ class AhsPolicyTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("fixes the AHS config", result.stderr)
+
+    def test_population_ablation_wrapper_rejects_scope_overrides(self) -> None:
+        result = subprocess.run(
+            [str(ahs.ROOT / "run_ahs_population_ablation.sh"), "--set", "smoke"],
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("fixes config, set, and variants", result.stderr)
 
 
 class AhsVerificationTests(unittest.TestCase):
@@ -282,6 +398,7 @@ class AhsVerificationTests(unittest.TestCase):
                 "#!/usr/bin/env python3\n"
                 "print('c metric phase=repair iteration=3 seconds=0.25 cycles_before=4 cycles_after=2')\n"
                 "print('c solver_stats iteration=3 conflicts=7 decisions=9 propagations=11 clauses=13 variables=17 avg_clause_len=2.5 cpu_solve_seconds=0.2')\n"
+                "print('c population iteration=3 size_before=2 size_after=3 parents_tried=2 improvements=1 budget_exhausted=0 cooldown_skipped=0 outer_rounds=2 guided_rounds=4 chained_lk_rounds=1 round_limit_hits=0')\n"
                 "print('overall incremented number = 3')\n"
                 "print('overall number of added block clauses = 5')\n"
                 "print('solution:')\n"
@@ -311,6 +428,10 @@ class AhsVerificationTests(unittest.TestCase):
             self.assertEqual(result["phase_stats"]["repair"]["calls"], 1)
             self.assertEqual(result["phase_stats"]["repair"]["cycle_reduction_total"], 2)
             self.assertEqual(result["solver_stats"]["conflicts"], 7)
+            self.assertEqual(result["population_stats"]["improvements_total"], 1)
+            self.assertEqual(result["population_stats"]["last_population_size"], 3)
+            self.assertEqual(result["population_stats"]["guided_rounds_total"], 4)
+            self.assertEqual(result["population_stats"]["budget_exhausted_calls"], 0)
 
     def test_end_to_end_accepts_only_a_verified_fake_backend_tour(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -390,7 +511,7 @@ class AhsVerificationTests(unittest.TestCase):
             backend_result = runner.parse_backend_result(result.stdout)
             self.assertIsNotNone(backend_result)
             self.assertEqual(backend_result["schema_version"], 1)
-            self.assertEqual(backend_result["stage_schema_version"], 1)
+            self.assertEqual(backend_result["stage_schema_version"], 2)
             stage = backend_result["stage_results"][0]
             self.assertEqual(stage["increments"], 3)
             self.assertEqual(stage["blocking_clauses"], 5)

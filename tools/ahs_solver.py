@@ -42,6 +42,7 @@ STAGE_EVENT_FIELDS = (
     "returncode",
     "timed_out",
     "allocated_timeout_sec",
+    "internal_timeout_sec",
     "wall_sec",
     "verified",
     "verification_reason",
@@ -55,6 +56,8 @@ STAGE_EVENT_FIELDS = (
     "phase_stats",
     "phase_seconds",
     "solver_stats",
+    "population_stats",
+    "termination_reason",
     "backend_result",
     "backend_activity",
 )
@@ -266,6 +269,12 @@ def raw_log_text(
     )
 
 
+def internal_timeout_with_reserve(timeout_sec: float) -> float:
+    """Leave the backend time to emit its final status before external SIGTERM."""
+    reserve = min(1.0, max(0.5, timeout_sec * 0.01), timeout_sec * 0.2)
+    return max(0.001, timeout_sec - reserve)
+
+
 def run_stage(
     backend: dict[str, Any],
     binary: Path,
@@ -283,8 +292,10 @@ def run_stage(
         *runner.option_argv(backend.get("options", {})),
         *[str(value) for value in backend.get("arguments", [])],
     ]
+    internal_timeout_sec: float | None = None
     if backend.get("supports_internal_timeout", False):
-        command.extend(["--timeout", str(timeout_sec)])
+        internal_timeout_sec = internal_timeout_with_reserve(timeout_sec)
+        command.extend(["--timeout", str(internal_timeout_sec)])
     if backend.get("supports_output_tour", False):
         command.extend(["--output-tour", str(backend_tour)])
 
@@ -317,6 +328,7 @@ def run_stage(
             "backend": backend["name"],
             "command": command,
             "allocated_timeout_sec": timeout_sec,
+            "internal_timeout_sec": internal_timeout_sec,
             "status": status,
             "solver_status": parsed_status,
             "returncode": returncode,
@@ -337,6 +349,8 @@ def run_stage(
                 "phase_stats": phase_stats,
                 "phase_seconds": phase_seconds,
                 "solver_stats": runner.parse_solver_stats(stdout),
+                "population_stats": runner.parse_population_stats(stdout),
+                "termination_reason": runner.parse_termination_reason(stdout),
                 "backend_result": runner.parse_backend_result(stdout),
                 "backend_activity": runner.parse_hcup_activity(stdout),
             }
@@ -354,6 +368,7 @@ def run_stage(
                 "backend": backend["name"],
                 "command": command,
                 "allocated_timeout_sec": timeout_sec,
+                "internal_timeout_sec": internal_timeout_sec,
                 "status": "ERROR",
                 "solver_status": "NO_STATUS",
                 "returncode": None,
@@ -368,6 +383,8 @@ def run_stage(
                 "phase_stats": {},
                 "phase_seconds": {},
                 "solver_stats": None,
+                "population_stats": None,
+                "termination_reason": None,
                 "backend_result": None,
                 "backend_activity": None,
                 "error": f"{type(error).__name__}: {error}",
@@ -401,6 +418,7 @@ def skipped_stage_result(
         "backend": stage["backend"],
         "command": None,
         "allocated_timeout_sec": 0.0,
+        "internal_timeout_sec": None,
         "status": "SKIPPED_NO_BUDGET",
         "solver_status": "NO_STATUS",
         "returncode": None,
@@ -420,6 +438,8 @@ def skipped_stage_result(
         "phase_stats": {},
         "phase_seconds": {},
         "solver_stats": None,
+        "population_stats": None,
+        "termination_reason": "cumulative_deadline_elapsed",
         "backend_result": None,
         "backend_activity": None,
     }
@@ -638,9 +658,12 @@ def main() -> int:
         write_tour(output_tour, final_tour, graph_path.stem)
     total_wall_sec = time.perf_counter() - budget_started
     last_stage = stage_results[-1] if stage_results else {}
+    last_reason = str(last_stage.get("termination_reason") or "").lower()
     budget_exhausted = route_exhausted and (
         bool(last_stage.get("timed_out"))
         or last_stage.get("status") == "SKIPPED_NO_BUDGET"
+        or "timeout" in last_reason
+        or "deadline" in last_reason
         or total_wall_sec >= usable_budget - 0.05
     )
     summary = {
@@ -671,7 +694,7 @@ def main() -> int:
         + json.dumps(
             {
                 "schema_version": 1,
-                "stage_schema_version": 1,
+                "stage_schema_version": 2,
                 "implementation": "AHS-v1-driver",
                 "policy": policy_name,
                 "route": family,

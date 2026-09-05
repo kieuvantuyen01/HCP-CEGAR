@@ -1,4 +1,4 @@
-# AHS v1: cách chạy và ý nghĩa của từng thành phần
+# AHS v1 và nhánh population-guided: cách chạy và ý nghĩa
 
 ## 1. AHS v1 hiện làm gì?
 
@@ -14,6 +14,11 @@ AHS v1 là một portfolio SAT có ngân sách chung. Trên mỗi graph, control
 [`benchmarks/ahs_policy.json`](../benchmarks/ahs_policy.json), nên mỗi lần chạy có
 thể tái lập và kiểm tra được. Việc tích hợp hiện ở mức tiến trình; các backend
 chưa truyền SAT state hoặc learned clause cho nhau.
+
+Nhánh nghiên cứu kế tiếp đã có một treatment chạy được trong chính
+`cegar-fix`: `cegar_sinz_population_guided`. Nó giữ một population nhỏ gồm các
+cycle cover SAT đã gặp, rồi thử ghép cover hiện tại với cạnh của cover cũ. Nhánh
+này là ablation riêng; `rule_v2` và các baseline cũ không tự động bật nó.
 
 ## 2. Vì sao AHS v0 không được dùng tiếp?
 
@@ -52,6 +57,42 @@ lên trước và cấp toàn bộ core-33 cho hai HCup mode bổ sung; đây l�
 | `cegar_sinz_2loop_2opt3` | CEGAR CNF chuẩn, exact-one Sinz, vá cycle bằng 2-opt | Tour qua verifier độc lập |
 | `hcup_outside_mergecutset` | CEGAR của HCup với merge-cutset | Tour qua verifier độc lập |
 | `hcup_hfp_preventsubcycle` | IPASIR-UP ngăn subtour ngay khi SAT đang tìm kiếm | Tour qua verifier độc lập |
+| `cegar_sinz_population_guided` | Sinz-CEGAR và edge-assembly recombination từ các cycle cover SAT trước | Cover trung gian được kiểm tra trong graph; tour cuối qua verifier độc lập |
+
+## 3.1 Population-guided CEGAR làm gì?
+
+Mỗi model SAT thỏa các ràng buộc bậc cho ta một hoặc nhiều vòng rời nhau. Module
+`population_patcher.rs` lưu tối đa 13 cover khác nhau về tập cạnh. Với cover mới,
+module chọn tối đa bốn cover cũ có nhiều cạnh nối chéo giữa các vòng hiện tại và
+có độ đa dạng cạnh cao. Nó chỉ thử hai phép an toàn:
+
+1. 2-opt dùng hai cạnh thay thế cùng xuất hiện trong cover cha;
+2. chained k-opt trên graph hợp của cạnh cover hiện tại và cover cha.
+
+Ứng viên chỉ được nhận nếu số vòng giảm, chứa mỗi đỉnh đúng một lần và mọi cạnh
+đều có trong graph. Với degree-2 contraction, cạnh cưỡng bức không được phép bị
+cắt. Nếu không tạo được ứng viên tốt hơn, CEGAR tiếp tục như cũ.
+
+Recombination dùng deadline chung của solver. Mỗi parent có tối đa 32 vòng luân
+phiên, mỗi lần guided matching tối đa 64 vòng và chained LK tối đa 32 vòng. Nếu
+hết deadline, backend trả `UNKNOWN`; nếu chỉ chạm giới hạn vòng, CEGAR tiếp tục
+với cover tốt nhất đã được kiểm tra. Telemetry ghi thêm `budget_exhausted`, số
+vòng của từng phase và `round_limit_hits`.
+
+Khi các lần thử liên tiếp không giảm được số vòng, patcher dùng backoff tăng dần:
+bỏ qua 1, 3, 7, 15, 31 rồi tối đa 63 model trước lần thử tiếp theo. Cover mới vẫn
+được lưu trong thời gian chờ. Một lần cải thiện sẽ đặt backoff về 0. Trường
+`cooldown_skipped` cho biết một call chỉ quan sát cover mà không chạy local search.
+
+AHS đặt deadline nội bộ sớm hơn thời điểm kill tiến trình con từ 20% ở cap rất
+ngắn đến tối đa một giây ở cap dài. Khoảng này dành cho backend trả `UNKNOWN`,
+in telemetry và đóng file; nó được áp dụng giống nhau cho hai nhánh A/B.
+
+Các component của cover đã kiểm tra có thể sinh cut-set hợp lệ: trong mọi chu
+trình Hamilton, một tập đỉnh khác rỗng và khác toàn bộ graph phải có cạnh đi vào
+và đi ra. Vì vậy cut từ offspring không phụ thuộc vào việc offspring có phải
+model SAT hiện tại hay không. Heuristic không bao giờ được dùng để kết luận
+`UNSAT`; kết luận `SAT` vẫn phải qua verifier trên graph gốc.
 
 Các backend dùng cùng giới hạn một luồng qua biến môi trường do controller đặt.
 Build time không tính vào ngân sách giải.
@@ -141,6 +182,31 @@ Chạy core 33 với wrapper residual cố định:
   --output benchmark-runs/ahs-residual33-v1-1800s
 ```
 
+Chạy A/B đúng một thay đổi trên core-33: baseline CEGAR và treatment population
+được cấp cùng timeout, cùng encoding và cùng cut method:
+
+```bash
+./run_ahs_population_ablation.sh \
+  --timeout 1800 \
+  --output benchmark-runs/population-cegar-ablation-open33 \
+  --resume
+```
+
+Nếu chỉ cần chạy treatment rồi quay lại sau, dùng wrapper cố định và `--resume`:
+
+```bash
+nohup ./run_ahs_population33.sh \
+  --timeout 1800 \
+  --output benchmark-runs/population-cegar-open33-1800s \
+  --resume \
+  > population-cegar-open33-1800s.console.log 2>&1 &
+```
+
+Policy `residual_memetic_v1` cũng đã được khai báo để thử coverage theo thứ tự
+population-CEGAR, HCup outside, HFP. Không dùng policy này để đo đóng góp riêng
+của recombination; cho ablation phải dùng cặp `ahs_cegar_only` và
+`ahs_population_cegar_only` ở trên.
+
 Với 33 instance chạy tuần tự, cap 1.800 giây có trần khoảng 16,5 giờ; cap 3.600
 giây có trần khoảng 33 giờ, chưa tính thời gian setup. Instance giải sớm sẽ làm
 tổng thời gian ngắn hơn.
@@ -177,12 +243,32 @@ Ba trường cần đọc cùng nhau:
 - `budget_exhausted`: stage cuối chạm deadline tổng. Cả hai trường này đều không
   có nghĩa graph vô nghiệm.
 
+Treatment mới ghi thêm phase `population_recombine`. Hai trường quan trọng là
+`cycle_reduction_total` trong `phase_stats` và `population_stats` với tổng số
+parent đã thử, số lần cải thiện và kích thước population. Raw log vẫn giữ từng
+dòng `c population ... parents_tried=... improvements=...`. Giảm nhiều cycle chỉ là
+dấu hiệu cơ chế có hoạt động; tiêu chuẩn thành công vẫn là thêm instance được
+giải hoặc giảm runtime/PAR-2 trên A/B cùng điều kiện.
+
 Với benchmark nhiều instance, `results.jsonl` chứa một record cho từng cặp
 instance--variant. Mỗi kết quả SAT vẫn có `verified=true`; nếu không, runner đổi
 trạng thái thành `INVALID_SAT`. Với một variant AHS, telemetry của từng solver
 nằm trong `portfolio_stage_results`. Các trường top-level `increments`,
 `blocking_clauses` và `backend_activity` chỉ mô tả output trực tiếp của variant;
 chúng có thể là `null` khi variant đó là controller AHS.
+
+`stage_schema_version=2` bổ sung `internal_timeout_sec` và
+`termination_reason`; analyzer vẫn đọc được record schema cũ vì các trường mới
+đều có giá trị mặc định khi thiếu.
+
+Không cộng `population_stats` ở top-level cho AHS. Dùng trình phân tích paired;
+trình này tự đọc `portfolio_stage_results[]`, tính coverage, timeout, PAR-2,
+overhead và tạo CSV theo từng instance:
+
+```bash
+python3 tools/analyze_population_ablation.py \
+  benchmark-runs/population-cegar-ablation-open33/results.jsonl
+```
 
 Manifest lưu hash của binary/config và commit/dirty state để nhận diện run. Nếu
 source đang dirty, các trường này chưa đủ để rebuild chính xác vì manifest không
@@ -191,7 +277,9 @@ ghi trong outer benchmark manifest.
 
 ## 8. Phần chưa được tích hợp
 
-AHS v1 chưa chuyển learned clause hay cut giữa các backend. SAT repair, CRE--CEGAR
+AHS v1 chưa chuyển learned clause hay cut giữa các backend. Population-guided
+recombination hiện chỉ chia sẻ cycle cover giữa các vòng CEGAR trong cùng một
+process. SAT repair, CRE--CEGAR
 và wrapper Cardinality-CDCL lịch sử cũng chưa thuộc policy mặc định. Chúng chỉ nên
 được thêm sau khi có:
 

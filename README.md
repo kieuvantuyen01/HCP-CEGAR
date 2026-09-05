@@ -84,6 +84,33 @@ backend used by the default policy before a long run starts.
 ./run_ahs_residual33.sh --timeout 1800 --output benchmark-runs/ahs-residual33-v1-1800s
 ```
 
+Nhánh thử nghiệm kế tiếp tích hợp population-guided edge recombination trực tiếp
+vào CEGAR, không cần học máy và không thay đổi baseline mặc định. Chạy A/B trên
+core-33 bằng:
+
+```bash
+./run_ahs_population_ablation.sh \
+  --timeout 1800 \
+  --output benchmark-runs/population-cegar-ablation-open33 \
+  --resume
+```
+
+Tổng hợp đúng telemetry theo từng stage AHS và tạo CSV paired:
+
+```bash
+python3 tools/analyze_population_ablation.py \
+  benchmark-runs/population-cegar-ablation-open33/results.jsonl
+```
+
+Để chỉ chạy treatment có thể resume sau 1--2 ngày:
+
+```bash
+nohup ./run_ahs_population33.sh \
+  --timeout 1800 \
+  --output benchmark-runs/population-cegar-open33-1800s \
+  --resume > population-cegar-open33-1800s.console.log 2>&1 &
+```
+
 `run_ahs_benchmark.sh` is the general runner. The explicitly named core-33
 wrapper uses `residual_v1`, because those instances are outside the historical
 968-instance union; it must not be reported as the full-dataset policy.

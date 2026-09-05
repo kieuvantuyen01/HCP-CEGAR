@@ -509,7 +509,7 @@ Ta gọi phương pháp là \textbf{Adaptive Hybrid SAT-HCP}, viết tắt \text
 
 \clearpage
 \begin{warningbox}[Trạng thái cài đặt]
-AHS v1 đã có driver cố định để chọn lộ trình từ đặc trưng graph, chia một ngân sách tổng cho ba backend portable, dừng tiến trình con khi hết giờ, kiểm chứng tour độc lập và lưu manifest/raw log/summary. Ba backend hiện tại là CEGAR--Sinz trong \code{cegar-fix}, HCup \code{outside-mergecutset} và HCup \code{hfp-preventsubcycle}. Đây vẫn là tích hợp ở mức tiến trình; các backend chưa trao đổi cut hoặc SAT state. \code{cegar-fix} có prototype sub-HCP repair và CRE có prototype \code{--cegar}, nhưng GraphCutPool, Phase B và CRE--CEGAR chưa được nối vào policy mặc định. Vì vậy sơ đồ trên là kiến trúc đích; phần đang chạy là controller tuần tự và verifier chung.
+AHS v1 đã có driver cố định để chọn lộ trình từ đặc trưng graph, chia một ngân sách tổng cho ba backend portable, dừng tiến trình con khi hết giờ, kiểm chứng tour độc lập và lưu manifest/raw log/summary. Ba backend mặc định là CEGAR--Sinz trong \code{cegar-fix}, HCup \code{outside-mergecutset} và HCup \code{hfp-preventsubcycle}. Một treatment thứ tư, \code{cegar\_sinz\_population\_guided}, đã chạy được để ablate recombination giữa các cycle cover SAT. Treatment này chưa nằm trong \code{rule\_v2}. Tích hợp giữa các backend vẫn ở mức tiến trình; chúng chưa trao đổi cut hoặc SAT state. \code{cegar-fix} có prototype sub-HCP repair và CRE có prototype \code{--cegar}, nhưng GraphCutPool, Phase B và CRE--CEGAR chưa được nối vào policy mặc định. Vì vậy sơ đồ trên là kiến trúc đích; phần đang chạy gồm controller tuần tự, verifier chung và population nội bộ tùy chọn trong CEGAR.
 \end{warningbox}
 
 \begin{resultbox}[Không có học máy trong source hiện tại]
@@ -538,6 +538,46 @@ Mỗi cycle cover được xử lý theo thứ tự:
 \end{enumerate}
 
 HCup \code{outside-mergecutset} áp dụng 2-opt exhaustively rồi mới sinh cut-set cho các component còn lại. \code{cegar-fix} dùng tùy chọn 2-opt riêng. Hai cách này phải được báo cáo thành hai cấu hình khác nhau cho đến khi một ablation trực tiếp cho thấy có thể thay thế lẫn nhau.
+
+\section{Treatment đã triển khai: population-guided CEGAR}
+
+Memetic algorithm thường giữ nhiều lời giải ứng viên thay vì chỉ một lời giải. Nó ghép hai ứng viên để giữ lại những cạnh hữu ích của cả hai, sau đó dùng local search để sửa. Ý tưởng này được đưa vào CEGAR theo cách hẹp và có thể kiểm chứng, lấy cảm hứng từ Ali và Moscato~\cite{ali2024}.
+
+Ở đây mỗi model SAT là một \emph{cycle cover}: mọi đỉnh đã có đúng một cạnh vào và một cạnh ra, nhưng graph có thể còn nhiều vòng rời nhau. Module \code{population\_patcher.rs} giữ tối đa 13 cover có tập cạnh khác nhau. Khi có cover mới, nó làm bốn việc:
+
+\begin{enumerate}
+  \item chọn tối đa bốn cover cũ có nhiều cạnh nối giữa các vòng hiện tại và đủ khác cover mới;
+  \item thử 2-opt với hai cạnh nối lấy từ cover cha;
+  \item nếu còn ít nhất ba vòng, thử chained k-opt trên hợp cạnh của cover hiện tại và cover cha;
+  \item chỉ nhận offspring khi số vòng giảm, mỗi đỉnh xuất hiện đúng một lần và mọi cạnh đều thuộc graph.
+\end{enumerate}
+
+Để một model SAT khó không giữ toàn bộ thời gian của CEGAR, recombination dùng
+deadline chung của solver. Mỗi parent có tối đa 32 vòng luân phiên; guided
+matching và chained LK lần lượt có tối đa 64 và 32 vòng trong mỗi lần gọi. Cả
+hai local search đều kiểm tra deadline trong lúc duyệt. Nếu hết giờ mà chưa có
+tour, backend trả \code{UNKNOWN}; nếu chỉ chạm giới hạn vòng, CEGAR tiếp tục với
+cover tốt nhất đã qua kiểm tra. Các giới hạn này là hàng rào thực thi, chưa phải
+tham số đã được chứng minh tối ưu.
+
+Nếu nhiều lần thử liên tiếp không giảm được số vòng, patcher giãn các lần thử
+theo dãy 1, 3, 7, 15, 31 và tối đa 63 model. Trong thời gian chờ, cover mới vẫn
+được lưu; một lần cải thiện đặt khoảng chờ về 0. Cơ chế này tránh lặp local
+search không hiệu quả ở mỗi model SAT.
+
+Controller đặt timeout nội bộ sớm hơn hard kill của tiến trình con một khoảng
+tối đa một giây. Khoảng nhỏ này cho phép backend in trạng thái và telemetry khi
+hết ngân sách; cùng quy tắc được áp dụng cho baseline và treatment.
+
+Ta có thể hình dung SAT đã tìm hai bản nháp khác nhau. Mỗi bản nháp đều chưa phải một vòng lớn, nhưng một cạnh trong bản thứ nhất có thể nối hai vòng đang tách rời trong bản thứ hai. Recombination thử đúng các cạnh bổ sung đó trước, thay vì quét toàn bộ graph.
+
+\begin{resultbox}[Ranh giới tính đúng]
+Population patcher không được trả lời \code{UNSAT}. Nếu ghép thất bại, kết quả chỉ là không cải thiện và CEGAR tiếp tục. Nếu ghép thành một tour, tour vẫn phải qua verifier trên graph gốc. Với graph đã contraction, patcher không được cắt cạnh đại diện cho chuỗi degree-2 cưỡng bức.
+\end{resultbox}
+
+Cut sinh từ offspring vẫn sound. Lý do là mỗi vòng con tạo ra một tập đỉnh $S$ khác rỗng và khác toàn bộ $V$. Mọi chu trình Hamilton phải có ít nhất một cạnh đi từ $S$ ra $V\setminus S$ và ít nhất một cạnh đi ngược lại. Mệnh đề này đúng cho mọi tập $S$, không yêu cầu offspring phải là model SAT hiện tại.
+
+Baseline là \code{cegar\_sinz\_2loop\_2opt3}. Nó đặt \code{--population-patcher 0}; treatment chỉ đổi thành 1. Nhờ vậy A/B đo đúng phần đóng góp của population. Các số smoke test cũ được tạo trước khi có deadline, hard cap, thứ tự cut xác định và backoff nên chỉ chứng minh prototype từng kích hoạt; chúng không dùng để đánh giá phiên bản hiện tại. Chưa được kết luận treatment nhanh hơn trước khi chạy core-33 và easy-control cùng điều kiện.
 
 \section{Phase B: SAT-guided repair}
 
@@ -614,6 +654,9 @@ Sau mỗi vòng CEGAR, controller ghi:
   \item thời gian SAT call gần nhất và tỷ lệ tăng;
   \item số cut-set, độ dài cut và số blocking clause;
   \item thời gian dành cho từng patcher;
+  \item với population: số cover đang giữ, số parent đã thử, số lần cải thiện,
+  tổng số subcycle đã giảm, số vòng local search, số lần chạm giới hạn vòng và
+  số lần hết deadline hoặc bỏ qua do backoff;
   \item SAT mode hiện tại; với CRE ghi thêm $M$, số biến/clause vị trí và số model nhiều cycle;
   \item graph density $m/n$, tỷ lệ đỉnh bậc 2, max degree và số hub.
 \end{itemize}
@@ -896,6 +939,17 @@ Phương pháp mới phải được chạy như một cấu hình đã chốt, 
   \item bảo đảm mọi cut đều sound bằng unit test trên graph nhỏ.
 \end{itemize}
 
+\section{Giai đoạn 1a: ablate population-guided CEGAR}
+
+Phần code của treatment đã hoàn tất; phần bằng chứng chưa hoàn tất. Hai cấu hình A/B là:
+
+\begin{itemize}
+  \item baseline: \code{ahs\_cegar\_only};
+  \item treatment: \code{ahs\_population\_cegar\_only}.
+\end{itemize}
+
+Hai cấu hình phải chạy trên cùng máy, cùng cap và cùng thứ tự instance. Trước tiên chạy core-33 để tìm marginal coverage, sau đó chạy \code{easy\_overhead} để đo regression. Chỉ đưa treatment vào policy tổng quát nếu nó có thêm nghiệm hoặc cải thiện PAR-2 mà không gây thoái lui lớn trên tập đối chứng.
+
 \section{Giai đoạn 2: kiểm chứng và ablate CRE--CEGAR}
 
 Prototype CRE đã có nên có thể kiểm tra trước khi port sâu:
@@ -1076,6 +1130,32 @@ Chạy CRE--CEGAR $M=420$ với external timeout và verifier chung:
   --output benchmark-runs/cre-cegar-m420-open33
 \end{verbatim}
 
+\newpage
+Chạy A/B cho population-guided CEGAR trên core-33:
+
+\begin{verbatim}
+./run_ahs_population_ablation.sh \
+  --timeout 1800 \
+  --output benchmark-runs/population-cegar-ablation-open33 \
+  --resume
+\end{verbatim}
+
+Tạo bảng paired theo từng instance và đọc telemetry từ đúng stage bên trong AHS:
+
+\begin{verbatim}
+python3 tools/analyze_population_ablation.py \
+  benchmark-runs/population-cegar-ablation-open33/results.jsonl
+\end{verbatim}
+
+Nếu chỉ cần chạy treatment ở background và quay lại sau:
+
+\begin{verbatim}
+nohup ./run_ahs_population33.sh \
+  --timeout 1800 \
+  --output benchmark-runs/population-cegar-open33-1800s \
+  --resume > population-cegar-open33-1800s.console.log 2>&1 &
+\end{verbatim}
+
 Import kết quả mới vào coverage động:
 
 \begin{verbatim}
@@ -1096,6 +1176,11 @@ R. Ohashi, T. Soh, D. Le Berre, H. Nabeshima, M. Banbara, K. Inoue, và N. Tamur
 F. Funder.
 \newblock \emph{An UPgrade for HCP: Solving the Hamiltonian Cycle Problem via User Propagators}.
 \newblock Diplomarbeit, Technische Universität Wien, 2026.
+
+\bibitem{ali2024}
+S. Ali và P. Moscato.
+\newblock \emph{A Memetic Algorithm To Find a Hamiltonian Cycle in a Hamiltonian Graph}.
+\newblock arXiv:2403.07886, 2024.
 
 \bibitem{biere2009}
 A. Biere, M. Heule, H. van Maaren, và T. Walsh, biên tập.

@@ -3,7 +3,7 @@ use rustsat::types::*;
 use rustsat::solvers::*;
 use rustsat::clause;
 use rustsat_cadical::Config;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::time::{Instant,Duration};
 // use crate::encoder;
 use crate::graph::*;
@@ -13,6 +13,7 @@ use crate::contraction::Degree2Contractor;
 use crate::hub_registry::HubRegistry;
 use crate::patching::HubPatcher;
 use crate::matching_patcher::MatchingPatcher;
+use crate::population_patcher::PopulationPatcher;
 use crate::chained_lk::ChainedLKSolver;
 use crate::ils_patcher::IteratedLocalSearchPatcher;
 use crate::macro_solver::MacroGraphSolver;
@@ -32,6 +33,7 @@ pub struct SolverFeatures {
     pub chained_lk: bool,
     pub ils_patcher: bool,
     pub macro_patcher: bool,
+    pub population_patcher: bool,
     pub telemetry: bool,
 }
 
@@ -48,6 +50,7 @@ impl Default for SolverFeatures {
             chained_lk: true,
             ils_patcher: true,
             macro_patcher: true,
+            population_patcher: false,
             telemetry: false,
         }
     }
@@ -424,6 +427,14 @@ fn cegar(
 
     let mut stall_count = 0i32;
     let mut previous_remaining_cycles = 0usize;
+    let mut population_patcher = PopulationPatcher::new(13, 4);
+    let population_deadline = instant
+        .checked_add(Duration::from_secs_f64(if timeout_secs.is_finite() && timeout_secs > 0.0 {
+            timeout_secs
+        } else {
+            0.0
+        }))
+        .unwrap_or(instant);
 
     loop {
         if instant.elapsed().as_secs_f64() >= timeout_secs {
@@ -499,6 +510,69 @@ fn cegar(
                 println!("sat solution cycle lengths map (length:number) = {:?}", map_cycle_lengths(&sol_cycles));
 
                 let raw_sol_cycles = sol_cycles.clone();
+
+                // Recombine this SAT cover with a small population of earlier
+                // covers.  This is a heuristic constructor only: it cannot
+                // report UNSAT and every accepted offspring is a valid cycle
+                // cover in the original (possibly contracted) graph.
+                let sol_cycles = if features.population_patcher && sol_cycles.len() > 1 {
+                    let phase_start = Instant::now();
+                    let before = sol_cycles.len();
+                    let result = population_patcher.patch_and_observe_until(
+                        &sol_cycles,
+                        &g,
+                        contractor,
+                        hub_registry,
+                        population_deadline,
+                    );
+                    print_phase_metric(
+                        features,
+                        "population_recombine",
+                        count,
+                        phase_start.elapsed(),
+                        before,
+                        result.cycles.len(),
+                    );
+                    if features.telemetry {
+                        println!(
+                            "c population iteration={} size_before={} size_after={} parents_tried={} improvements={} budget_exhausted={} cooldown_skipped={} outer_rounds={} guided_rounds={} chained_lk_rounds={} round_limit_hits={}",
+                            count,
+                            result.population_size_before,
+                            result.population_size_after,
+                            result.parents_tried,
+                            result.improvements,
+                            usize::from(result.budget_exhausted),
+                            usize::from(result.cooldown_skipped),
+                            result.outer_rounds,
+                            result.guided_rounds,
+                            result.chained_lk_rounds,
+                            result.round_limit_hits,
+                        );
+                    }
+                    if result.cycles.len() == 1
+                        && result.cycles[0].len() == g.adjacency_list.len()
+                    {
+                        println!("number of subcycles found = 1 (via population recombination)");
+                        let flat: Vec<i32> = result.cycles.into_iter().flatten().collect();
+                        return (
+                            SolverOutcome::sat(contractor.uncontract_cycle(&flat)),
+                            count,
+                            clause_count,
+                        );
+                    }
+                    if result.budget_exhausted {
+                        return (
+                            SolverOutcome::unknown(
+                                "population recombination reached the global deadline".to_string(),
+                            ),
+                            count,
+                            clause_count,
+                        );
+                    }
+                    result.cycles
+                } else {
+                    sol_cycles
+                };
 
                 // Attempt Multi-Subcycle Hub Patching
                 let sol_cycles = if features.hub_patcher && sol_cycles.len() > 1 && !hub_registry.hub_vertices.is_empty() {
@@ -623,10 +697,18 @@ fn cegar(
                 };
 
                 let phase_start = Instant::now();
+                // The population backend deliberately continues from its valid
+                // repaired cover.  Other configurations retain the historical
+                // raw-model behaviour, which keeps baseline reproduction stable.
+                let constructor_input = if features.population_patcher {
+                    &sol_cycles
+                } else {
+                    &raw_sol_cycles
+                };
                 let (mut block_clauses, mut active_cycles) = if opt == 0 {
-                    (get_blocking_clauses(&raw_sol_cycles, encoder, &g, block_method, balanced, features.short_cycle_sec), raw_sol_cycles.clone())
+                    (get_blocking_clauses(constructor_input, encoder, &g, block_method, balanced, features.short_cycle_sec), constructor_input.to_vec())
                 } else if opt >= 1 {
-                    let (clauses, cycles) = two_opt(&raw_sol_cycles, encoder, &g, contractor, hub_registry, block_method, balanced, opt, effective_three_opt, features.short_cycle_sec);
+                    let (clauses, cycles) = two_opt(constructor_input, encoder, &g, contractor, hub_registry, block_method, balanced, opt, effective_three_opt, features.short_cycle_sec);
                     if cycles.len() == 1 && cycles[0].len() == g.adjacency_list.len() {
                         let flat: Vec<i32> = cycles.into_iter().flatten().collect();
                         let full_cycle = contractor.uncontract_cycle(&flat);
@@ -644,7 +726,7 @@ fn cegar(
                     panic!("2-opt option \n-t 0:2-opt off\n-t 1,2,3:2-opt on");
                 };
 
-                print_phase_metric(features, "two_three_opt", count, phase_start.elapsed(), raw_sol_cycles.len(), active_cycles.len());
+                print_phase_metric(features, "two_three_opt", count, phase_start.elapsed(), constructor_input.len(), active_cycles.len());
 
                 if effective_fallback == 1 && active_cycles.len() > 1 {
                     let fallback = get_blocking_clauses(
@@ -1488,12 +1570,15 @@ pub fn get_boundary_cut_clauses(
     balanced: i32,
 ) -> Vec<Clause> {
     let mut clauses = Vec::new();
-    let cycle_set: HashSet<i32> = cycle.iter().cloned().collect();
+    // Preserve literal order across processes. Clause order changes CaDiCaL's
+    // search path, so a randomized HashSet made repeated A/B runs needlessly
+    // noisy even when every command-line option was identical.
+    let cycle_set: BTreeSet<i32> = cycle.iter().cloned().collect();
 
     // Technique A3: If |C| > |V| / 2, use complementary set S = V \ C
     let (target_set, is_complementary) = if cycle.len() > total_vertices / 2 && total_vertices > 0 {
-        let all_v: HashSet<i32> = g.adjacency_list.keys().cloned().collect();
-        let comp_set: HashSet<i32> = all_v.difference(&cycle_set).cloned().collect();
+        let all_v: BTreeSet<i32> = g.adjacency_list.keys().cloned().collect();
+        let comp_set: BTreeSet<i32> = all_v.difference(&cycle_set).cloned().collect();
         (comp_set, true)
     } else {
         (cycle_set, false)
@@ -1731,6 +1816,81 @@ pub fn get_induced_subgraph_sec_clauses(
 #[cfg(test)]
 mod tests_blocking_enhancements {
     use super::*;
+
+    fn permutations(values: &mut [i32], start: usize, output: &mut Vec<Vec<i32>>) {
+        if start == values.len() {
+            output.push(values.to_vec());
+            return;
+        }
+        for index in start..values.len() {
+            values.swap(start, index);
+            permutations(values, start + 1, output);
+            values.swap(start, index);
+        }
+    }
+
+    #[test]
+    fn test_boundary_cuts_preserve_every_k5_hamiltonian_tour() {
+        let vertices = [1, 2, 3, 4, 5];
+        let mut g = Graph::new();
+        for left in 0..vertices.len() {
+            for right in (left + 1)..vertices.len() {
+                g.add_edge(vertices[left], vertices[right]);
+            }
+        }
+        let mut encoder = Encoder::new();
+        encoder.encode(&g, 1, 0, 0, 0, 0, 0);
+
+        let mut tails = vec![2, 3, 4, 5];
+        let mut tail_permutations = Vec::new();
+        permutations(&mut tails, 0, &mut tail_permutations);
+        let tours: Vec<Vec<i32>> = tail_permutations
+            .into_iter()
+            .map(|tail| {
+                let mut tour = vec![1];
+                tour.extend(tail);
+                tour
+            })
+            .collect();
+
+        for mask in 1usize..((1usize << vertices.len()) - 1) {
+            let subset: Vec<i32> = vertices
+                .iter()
+                .enumerate()
+                .filter_map(|(index, &vertex)| ((mask & (1 << index)) != 0).then_some(vertex))
+                .collect();
+            let clauses = get_boundary_cut_clauses(
+                &subset,
+                &mut encoder,
+                &g,
+                vertices.len(),
+                0,
+            );
+            assert_eq!(clauses.len(), 2, "subset {:?} needs in/out cuts", subset);
+
+            for tour in &tours {
+                let selected_vars: HashSet<Var> = (0..tour.len())
+                    .map(|index| {
+                        encoder.graph_lit_map[&(
+                            tour[index],
+                            tour[(index + 1) % tour.len()],
+                        )]
+                        .var()
+                    })
+                    .collect();
+                for clause in &clauses {
+                    assert!(
+                        clause
+                            .iter()
+                            .any(|literal| literal.is_pos() && selected_vars.contains(&literal.var())),
+                        "boundary cut for {:?} removed tour {:?}",
+                        subset,
+                        tour,
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_boundary_cut_complementary_equivalence() {

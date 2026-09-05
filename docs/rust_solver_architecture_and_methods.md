@@ -29,6 +29,7 @@ Graph Input (.col)
        │              ├─ [stem_cycle_patcher.rs]: Stem-based alternating path splicing
        │              ├─ [matching_patcher.rs]: Maximum bipartite matching merging
        │              ├─ [chained_lk.rs / ils_patcher.rs]: Lin-Kernighan & ILS local search
+       │              ├─ [population_patcher.rs]: Edge-assembly giữa các SAT cycle cover
        │              ├─ [Partial MTZ Injection]: Bơm ràng buộc MTZ khi phát hiện stall
        │              └─ [Cut Blocking Clauses]: Sinh mệnh đề cắt (Cut / Subtour clauses)
        ▼
@@ -53,6 +54,7 @@ Hamiltonian Cycle Output (.hcp / .tou) + Independent Verifier
 | `-A, --adaptive-escalation` | Leo thang thích ứng | `0`: Tắt<br>`1`: **Bật (mặc định)** | Tự động phát hiện khi bộ giải bị dậm chân tại chỗ (Stall) để nâng cấp chiến lược chặn từ mềm sang cứng. |
 | `--mtz-stall <N>` | Bơm Miller-Tucker-Zemlin | `0`: Tắt<br>`N`: **Bơm ràng buộc MTZ sau N vòng stall** | Sinh biến thứ tự MTZ ($u_i$) và bất đẳng thức $u_i - u_j + n x_{ij} \le n - 1$ để phá vỡ bế tắc CEGAR. |
 | `-f, --cegar-fallback` | Hard Blocking Fallback | `0`: Tắt<br>`1`: **Bật** | Dự phòng chặn cứng toàn bộ cấu hình cạnh khi các bộ vá heuristic không hội tụ. |
+| `--population-patcher` | Population-guided recombination | `0`: Tắt (mặc định)<br>`1`: Bật treatment | Giữ tối đa 13 cycle cover SAT khác nhau; thử 2-opt/chained k-opt bằng cạnh của cover cha. Chỉ nhận cover hợp lệ có ít vòng hơn; không dùng heuristic để kết luận `UNSAT`. |
 
 ---
 
@@ -111,6 +113,17 @@ Hamiltonian Cycle Output (.hcp / .tou) + Independent Verifier
   - Sử dụng cú hích **Double-Bridge Kick (4-opt perturbation)** để thoát khỏi các cực tiểu địa phương (local minima) khi chu trình đạt kích thước gần trọn vẹn.
 - **`IteratedLocalSearchPatcher` (ILS):**
   - Kết hợp chu kỳ: *Local Search $\rightarrow$ Perturbation $\rightarrow$ Acceptance Criterion* để liên tục cải tiến độ dài của chu trình lớn nhất.
+- **`PopulationPatcher` (treatment thực nghiệm):**
+  - Chọn cover cha theo số cạnh nối chéo giữa các vòng hiện tại và độ đa dạng tập cạnh.
+  - Recombination chỉ dùng cạnh trong hợp của hai cover; mọi offspring được kiểm tra lại trên graph trước khi sinh cut hoặc trả tour.
+  - Baseline tái lập đặt `--population-patcher 0`. Chỉ bật cờ này trong A/B riêng cho đến khi có kết quả core-33 và easy-control.
+  - Treatment dùng deadline chung của solver và hard cap 32 vòng luân phiên cho
+    mỗi parent, 64 vòng guided matching và 32 vòng chained LK. Hết deadline trả
+    `UNKNOWN`; chạm round cap chỉ dừng local search và CEGAR tiếp tục.
+  - Telemetry báo riêng số vòng, `budget_exhausted` và `round_limit_hits` để phân
+    biệt overhead do hết thời gian với việc local search hội tụ bình thường.
+  - Sau các lần không cải thiện, backoff bỏ qua lần lượt 1, 3, 7, 15, 31 và tối
+    đa 63 model; cover mới vẫn được lưu và `cooldown_skipped` ghi số lần bỏ qua.
 
 ---
 

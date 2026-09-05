@@ -43,6 +43,43 @@
         "--chained-lk": "0",
         "--ils-patcher": "0",
         "--macro-patcher": "0",
+        "--population-patcher": "0",
+        "--telemetry": "1"
+      }
+    },
+    {
+      "name": "cegar_sinz_population_guided",
+      "source_dir": "src/cegar-fix",
+      "binary": "src/cegar-fix/target/release/cegar-fix",
+      "build_system": "cargo",
+      "status_protocol": "dimacs",
+      "trust_unsat": true,
+      "supports_internal_timeout": true,
+      "supports_output_tour": true,
+      "sat_solver": "CaDiCaL CEGAR plus verified edge-assembly recombination over prior SAT cycle covers",
+      "options": {
+        "-e": "1",
+        "-b": "3",
+        "-y": "0",
+        "-t": "3",
+        "-l": "1",
+        "--three-opt": "0",
+        "--cegar-fallback": "0",
+        "--mtz-stall": "0",
+        "--adaptive-escalation": "0",
+        "--degree2-triangle-prune": "0",
+        "--degree2-contraction": "0",
+        "--global-short-cuts": "0",
+        "--short-cycle-sec": "0",
+        "--cluster-cuts": "0",
+        "--modular-prepass": "0",
+        "--hub-partition-prepass": "0",
+        "--hub-patcher": "0",
+        "--matching-patcher": "0",
+        "--chained-lk": "0",
+        "--ils-patcher": "0",
+        "--macro-patcher": "0",
+        "--population-patcher": "1",
         "--telemetry": "1"
       }
     },
@@ -96,6 +133,14 @@
         "sparse_other": [{"backend": "cegar_sinz_2loop_2opt3", "fraction": 1.0}]
       }
     },
+    "population_cegar_only": {
+      "description": "A/B treatment: the portable Sinz CEGAR baseline plus only population-guided edge-assembly recombination.",
+      "routes": {
+        "dense": [{"backend": "cegar_sinz_population_guided", "fraction": 1.0}],
+        "sparse_degree2": [{"backend": "cegar_sinz_population_guided", "fraction": 1.0}],
+        "sparse_other": [{"backend": "cegar_sinz_population_guided", "fraction": 1.0}]
+      }
+    },
     "rule_v2": {
       "description": "Safe three-stage general policy using only portable, independently verified backends. Fractions remain experimental.",
       "routes": {
@@ -130,6 +175,26 @@
         "sparse_other": [
           {"backend": "hcup_outside_mergecutset", "fraction": 0.65},
           {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.35}
+        ]
+      }
+    },
+    "residual_memetic_v1": {
+      "description": "Experimental residual portfolio. Population-guided CEGAR is tested first; HCup stages retain fallback coverage. Fractions are hypotheses, not tuned results.",
+      "routes": {
+        "dense": [
+          {"backend": "cegar_sinz_population_guided", "fraction": 0.55},
+          {"backend": "hcup_outside_mergecutset", "fraction": 0.35},
+          {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.1}
+        ],
+        "sparse_degree2": [
+          {"backend": "cegar_sinz_population_guided", "fraction": 0.5},
+          {"backend": "hcup_outside_mergecutset", "fraction": 0.3},
+          {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.2}
+        ],
+        "sparse_other": [
+          {"backend": "cegar_sinz_population_guided", "fraction": 0.5},
+          {"backend": "hcup_outside_mergecutset", "fraction": 0.35},
+          {"backend": "hcup_hfp_preventsubcycle", "fraction": 0.15}
         ]
       }
     }

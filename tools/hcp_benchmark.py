@@ -29,6 +29,8 @@ METRIC_RE = re.compile(r"^c metric (?P<body>.*)$")
 INCREMENT_RE = re.compile(r"overall incremented number\s*=\s*(\d+)")
 CLAUSE_RE = re.compile(r"overall number of added block clauses\s*=\s*(\d+)")
 SOLVER_STATS_RE = re.compile(r"^c solver_stats (?P<body>.*)$")
+POPULATION_STATS_RE = re.compile(r"^c population (?P<body>.*)$")
+TERMINATION_REASON_RE = re.compile(r"^c reason=(?P<reason>\S.*)$")
 BACKEND_RESULT_PREFIX = "c result_json="
 HCUP_ACTIVITY_FIELDS = {
     "ASSIGNMENTS": "assignments",
@@ -399,6 +401,64 @@ def parse_solver_stats(stdout: str) -> dict[str, Any] | None:
     return last
 
 
+def parse_population_stats(stdout: str) -> dict[str, int] | None:
+    integer_fields = {
+        "iteration",
+        "size_before",
+        "size_after",
+        "parents_tried",
+        "improvements",
+        "budget_exhausted",
+        "cooldown_skipped",
+        "outer_rounds",
+        "guided_rounds",
+        "chained_lk_rounds",
+        "round_limit_hits",
+    }
+    summary = {
+        "calls": 0,
+        "parents_tried_total": 0,
+        "improvements_total": 0,
+        "max_population_size": 0,
+        "last_population_size": 0,
+        "last_iteration": 0,
+        "budget_exhausted_calls": 0,
+        "cooldown_skipped_calls": 0,
+        "outer_rounds_total": 0,
+        "guided_rounds_total": 0,
+        "chained_lk_rounds_total": 0,
+        "round_limit_hits_total": 0,
+    }
+    for line in stdout.splitlines():
+        match = POPULATION_STATS_RE.match(line.strip())
+        if not match:
+            continue
+        values: dict[str, int] = {}
+        for field in match.group("body").split():
+            key, separator, value = field.partition("=")
+            if separator and key in integer_fields:
+                try:
+                    values[key] = int(value)
+                except ValueError:
+                    continue
+        size_after = values.get("size_after", 0)
+        summary["calls"] += 1
+        summary["parents_tried_total"] += values.get("parents_tried", 0)
+        summary["improvements_total"] += values.get("improvements", 0)
+        summary["max_population_size"] = max(
+            summary["max_population_size"], size_after
+        )
+        summary["last_population_size"] = size_after
+        summary["last_iteration"] = values.get("iteration", 0)
+        summary["budget_exhausted_calls"] += values.get("budget_exhausted", 0)
+        summary["cooldown_skipped_calls"] += values.get("cooldown_skipped", 0)
+        summary["outer_rounds_total"] += values.get("outer_rounds", 0)
+        summary["guided_rounds_total"] += values.get("guided_rounds", 0)
+        summary["chained_lk_rounds_total"] += values.get("chained_lk_rounds", 0)
+        summary["round_limit_hits_total"] += values.get("round_limit_hits", 0)
+    return summary if summary["calls"] else None
+
+
 def parse_backend_result(stdout: str) -> dict[str, Any] | None:
     """Parse an optional backend-owned JSON summary without trusting its certificate."""
     last: dict[str, Any] | None = None
@@ -412,6 +472,15 @@ def parse_backend_result(stdout: str) -> dict[str, Any] | None:
             continue
         if isinstance(payload, dict):
             last = payload
+    return last
+
+
+def parse_termination_reason(stdout: str) -> str | None:
+    last: str | None = None
+    for line in stdout.splitlines():
+        match = TERMINATION_REASON_RE.match(line.strip())
+        if match:
+            last = match.group("reason")
     return last
 
 
@@ -864,6 +933,8 @@ def main() -> int:
                 "phase_stats": phase_stats,
                 "phase_seconds": phase_seconds,
                 "solver_stats": parse_solver_stats(stdout),
+                "population_stats": parse_population_stats(stdout),
+                "termination_reason": parse_termination_reason(stdout),
                 "backend_result": backend_result,
                 "portfolio_stage_results": extract_portfolio_stage_results(backend_result),
                 "backend_activity": parse_hcup_activity(stdout),

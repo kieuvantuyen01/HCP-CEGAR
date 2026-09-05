@@ -1,11 +1,89 @@
 use crate::contraction::Degree2Contractor;
 use crate::graph::Graph;
 use crate::hub_registry::HubRegistry;
+use std::collections::HashMap;
 
 /// Global maximum matching patcher for disjoint simultaneous 2-opt cycle merges.
 pub struct MatchingPatcher;
 
 impl MatchingPatcher {
+    /// Finds a 2-opt merge whose two replacement edges both occur in `guide`.
+    ///
+    /// This is used by population recombination: `guide` is the edge set of a
+    /// previous cycle cover, while `g` is the original graph.  The guide only
+    /// orders/restricts the search; every returned cycle is validated in `g`.
+    /// Looking up the at-most-two guide neighbours of each endpoint avoids the
+    /// quadratic all-edge-pairs scan used by the unrestricted patcher.
+    pub fn try_find_guided_2opt_merge(
+        c1: &[i32],
+        c2: &[i32],
+        guide: &Graph,
+        g: &Graph,
+        contractor: &Degree2Contractor,
+    ) -> Option<Vec<i32>> {
+        let k1 = c1.len();
+        let k2 = c2.len();
+        if k1 < 3 || k2 < 3 {
+            return None;
+        }
+
+        let positions_c2: HashMap<i32, usize> = c2
+            .iter()
+            .enumerate()
+            .map(|(position, &vertex)| (vertex, position))
+            .collect();
+
+        for i in 0..k1 {
+            let u = c1[i];
+            let u_next = c1[(i + 1) % k1];
+            if !is_safe_to_break(u, u_next, contractor) {
+                continue;
+            }
+
+            let Some(u_guides) = guide.adjacency_list.get(&u) else {
+                continue;
+            };
+            let Some(u_next_guides) = guide.adjacency_list.get(&u_next) else {
+                continue;
+            };
+
+            for &w in u_guides {
+                let Some(&w_position) = positions_c2.get(&w) else {
+                    continue;
+                };
+                for &w_next in u_next_guides {
+                    let Some(&w_next_position) = positions_c2.get(&w_next) else {
+                        continue;
+                    };
+
+                    // Orientation 1: u--w and u_next--w_next, where w_next
+                    // follows w in c2.
+                    if w_next_position == (w_position + 1) % k2
+                        && is_safe_to_break(w, w_next, contractor)
+                    {
+                        let merged = build_2opt_merge(c1, c2, i, w_position, false);
+                        if is_valid_cycle(&merged, g) {
+                            return Some(merged);
+                        }
+                    }
+
+                    // Orientation 2: u--w and u_next--w_next, where w follows
+                    // w_next in c2.  Here w_next is c2[j] and w is c2[j+1].
+                    if w_position == (w_next_position + 1) % k2
+                        && is_safe_to_break(w_next, w, contractor)
+                    {
+                        let merged = build_2opt_merge(c1, c2, i, w_next_position, true);
+                        if is_valid_cycle(&merged, g) {
+                            return Some(merged);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     /// Attempts to find a valid 2-opt reconnection between subcycle `c1` and `c2`.
     ///
     /// Evaluates all pairs of break edges `(c1[i], c1[i+1])` and `(c2[j], c2[j+1])`,
@@ -49,14 +127,7 @@ impl MatchingPatcher {
 
                 // Orientation 1: u_i <-> w_j and u_ip1 <-> w_jp1
                 if adj_ui.contains(&w_j) && adj_uip1.contains(&w_jp1) {
-                    let mut merged = Vec::with_capacity(k1 + k2);
-                    merged.extend_from_slice(&c1[0..=i]);
-                    for s in 0..k2 {
-                        merged.push(c2[(j + k2 - s) % k2]);
-                    }
-                    if i + 1 < k1 {
-                        merged.extend_from_slice(&c1[i + 1..]);
-                    }
+                    let merged = build_2opt_merge(c1, c2, i, j, false);
                     if is_valid_cycle(&merged, g) {
                         return Some(merged);
                     }
@@ -64,14 +135,7 @@ impl MatchingPatcher {
 
                 // Orientation 2: u_i <-> w_jp1 and u_ip1 <-> w_j
                 if adj_ui.contains(&w_jp1) && adj_uip1.contains(&w_j) {
-                    let mut merged = Vec::with_capacity(k1 + k2);
-                    merged.extend_from_slice(&c1[0..=i]);
-                    for s in 0..k2 {
-                        merged.push(c2[(j + 1 + s) % k2]);
-                    }
-                    if i + 1 < k1 {
-                        merged.extend_from_slice(&c1[i + 1..]);
-                    }
+                    let merged = build_2opt_merge(c1, c2, i, j, true);
                     if is_valid_cycle(&merged, g) {
                         return Some(merged);
                     }
@@ -178,6 +242,30 @@ impl MatchingPatcher {
 
         current_cycles
     }
+}
+
+fn build_2opt_merge(
+    c1: &[i32],
+    c2: &[i32],
+    c1_break: usize,
+    c2_break: usize,
+    orientation_two: bool,
+) -> Vec<i32> {
+    let mut merged = Vec::with_capacity(c1.len() + c2.len());
+    merged.extend_from_slice(&c1[0..=c1_break]);
+    if orientation_two {
+        for offset in 0..c2.len() {
+            merged.push(c2[(c2_break + 1 + offset) % c2.len()]);
+        }
+    } else {
+        for offset in 0..c2.len() {
+            merged.push(c2[(c2_break + c2.len() - offset) % c2.len()]);
+        }
+    }
+    if c1_break + 1 < c1.len() {
+        merged.extend_from_slice(&c1[c1_break + 1..]);
+    }
+    merged
 }
 
 #[inline]

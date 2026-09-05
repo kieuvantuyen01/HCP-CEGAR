@@ -2,12 +2,22 @@ use crate::contraction::Degree2Contractor;
 use crate::graph::Graph;
 use crate::hub_registry::HubRegistry;
 use std::collections::HashMap;
+use std::time::Instant;
 
 /// Lin-Kernighan / Variable-Depth Chained k-Opt Patcher.
 ///
 /// Discovers alternating closed walks across 3 to `max_depth` subcycles
 /// to break out of topological local minima without invoking SAT solver.
 pub struct ChainedLKSolver;
+
+/// Result of a deadline-aware chained LK call.
+#[derive(Clone, Debug)]
+pub struct BoundedChainedLKResult {
+    pub cycles: Vec<Vec<i32>>,
+    pub iterations: usize,
+    pub budget_exhausted: bool,
+    pub round_limit_reached: bool,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TraversalDirection {
@@ -33,20 +43,87 @@ impl ChainedLKSolver {
         hub_registry: &HubRegistry,
         max_depth: usize,
     ) -> Vec<Vec<i32>> {
+        Self::patch_cycles(
+            cycles,
+            g,
+            contractor,
+            hub_registry,
+            max_depth,
+            cycles.len().saturating_mul(2),
+            None,
+        )
+        .cycles
+    }
+
+    /// Apply chained LK with an explicit iteration cap and absolute deadline.
+    ///
+    /// Population-guided CEGAR uses this entry point so local search cannot keep
+    /// running after the solver's global budget has expired. The historical
+    /// unbounded-by-time entry point above is retained for the other backends.
+    pub fn patch_cycles_via_chained_lk_bounded(
+        cycles: &[Vec<i32>],
+        g: &Graph,
+        contractor: &Degree2Contractor,
+        hub_registry: &HubRegistry,
+        max_depth: usize,
+        max_iterations: usize,
+        deadline: Instant,
+    ) -> BoundedChainedLKResult {
+        Self::patch_cycles(
+            cycles,
+            g,
+            contractor,
+            hub_registry,
+            max_depth,
+            max_iterations,
+            Some(deadline),
+        )
+    }
+
+    fn patch_cycles(
+        cycles: &[Vec<i32>],
+        g: &Graph,
+        contractor: &Degree2Contractor,
+        hub_registry: &HubRegistry,
+        max_depth: usize,
+        max_iterations: usize,
+        deadline: Option<Instant>,
+    ) -> BoundedChainedLKResult {
         if cycles.len() < 3 || max_depth < 3 {
-            return cycles.to_vec();
+            return BoundedChainedLKResult {
+                cycles: cycles.to_vec(),
+                iterations: 0,
+                budget_exhausted: deadline_reached(deadline),
+                round_limit_reached: false,
+            };
         }
 
         let mut current_cycles = cycles.to_vec();
-        let max_iterations = current_cycles.len() * 2;
+        let mut iterations = 0;
+        let mut budget_exhausted = false;
+        let mut converged = false;
 
         for _ in 0..max_iterations {
+            if deadline_reached(deadline) {
+                budget_exhausted = true;
+                break;
+            }
             if current_cycles.len() < 3 {
+                converged = true;
                 break;
             }
 
-            if let Some((used_indices, merged)) =
-                Self::find_alternating_chain(&current_cycles, g, contractor, hub_registry, max_depth)
+            iterations += 1;
+            let mut search_budget_exhausted = false;
+            if let Some((used_indices, merged)) = Self::find_alternating_chain_until(
+                &current_cycles,
+                g,
+                contractor,
+                hub_registry,
+                max_depth,
+                deadline,
+                &mut search_budget_exhausted,
+            )
             {
                 let mut used = vec![false; current_cycles.len()];
                 for &idx in &used_indices {
@@ -62,11 +139,21 @@ impl ChainedLKSolver {
                 }
                 current_cycles = next_cycles;
             } else {
+                budget_exhausted = search_budget_exhausted;
+                converged = !search_budget_exhausted;
                 break;
             }
         }
 
-        current_cycles
+        BoundedChainedLKResult {
+            cycles: current_cycles,
+            iterations,
+            budget_exhausted,
+            round_limit_reached: !budget_exhausted
+                && !converged
+                && max_iterations > 0
+                && iterations == max_iterations,
+        }
     }
 
     /// Searches for an alternating chain across a subset of subcycles and returns the merged cycle.
@@ -89,6 +176,27 @@ impl ChainedLKSolver {
         hub_registry: &HubRegistry,
         max_depth: usize,
     ) -> Option<(Vec<usize>, Vec<i32>)> {
+        let mut budget_exhausted = false;
+        Self::find_alternating_chain_until(
+            cycles,
+            g,
+            contractor,
+            hub_registry,
+            max_depth,
+            None,
+            &mut budget_exhausted,
+        )
+    }
+
+    fn find_alternating_chain_until(
+        cycles: &[Vec<i32>],
+        g: &Graph,
+        contractor: &Degree2Contractor,
+        hub_registry: &HubRegistry,
+        max_depth: usize,
+        deadline: Option<Instant>,
+        budget_exhausted: &mut bool,
+    ) -> Option<(Vec<usize>, Vec<i32>)> {
         let n = cycles.len();
         if n < 3 || max_depth < 3 {
             return None;
@@ -108,6 +216,10 @@ impl ChainedLKSolver {
         let mut path_stack = Vec::with_capacity(effective_max_depth);
 
         for start_idx in 0..n {
+            if deadline_reached(deadline) {
+                *budget_exhausted = true;
+                return None;
+            }
             let start_cycle = &cycles[start_idx];
             let len0 = start_cycle.len();
             if len0 < 3 {
@@ -117,6 +229,11 @@ impl ChainedLKSolver {
             visited[start_idx] = true;
 
             for p in 0..len0 {
+                if deadline_reached(deadline) {
+                    visited[start_idx] = false;
+                    *budget_exhausted = true;
+                    return None;
+                }
                 // Forward orientation:
                 // entry = start_cycle[p], exit = start_cycle[(p + len0 - 1) % len0]
                 // broken edge = (exit, entry)
@@ -140,11 +257,17 @@ impl ChainedLKSolver {
                         &vertex_to_cycle,
                         &mut visited,
                         &mut path_stack,
+                        deadline,
+                        budget_exhausted,
                     ) {
                         return Some(res);
                     }
 
                     path_stack.pop();
+                    if *budget_exhausted {
+                        visited[start_idx] = false;
+                        return None;
+                    }
                 }
 
                 // Reverse orientation:
@@ -170,11 +293,17 @@ impl ChainedLKSolver {
                         &vertex_to_cycle,
                         &mut visited,
                         &mut path_stack,
+                        deadline,
+                        budget_exhausted,
                     ) {
                         return Some(res);
                     }
 
                     path_stack.pop();
+                    if *budget_exhausted {
+                        visited[start_idx] = false;
+                        return None;
+                    }
                 }
             }
 
@@ -193,7 +322,13 @@ impl ChainedLKSolver {
         vertex_to_cycle: &HashMap<i32, (usize, usize)>,
         visited: &mut [bool],
         path_stack: &mut Vec<ChainStep>,
+        deadline: Option<Instant>,
+        budget_exhausted: &mut bool,
     ) -> Option<(Vec<usize>, Vec<i32>)> {
+        if deadline_reached(deadline) {
+            *budget_exhausted = true;
+            return None;
+        }
         let current_depth = path_stack.len();
         let last_step = path_stack.last().unwrap();
         let exit_v = last_step.exit;
@@ -214,6 +349,10 @@ impl ChainedLKSolver {
 
         if current_depth < max_depth {
             for &nbr in neighbors {
+                if deadline_reached(deadline) {
+                    *budget_exhausted = true;
+                    return None;
+                }
                 if let Some(&(next_idx, pos_nbr)) = vertex_to_cycle.get(&nbr) {
                     if !visited[next_idx] {
                         let next_cycle = &cycles[next_idx];
@@ -243,12 +382,17 @@ impl ChainedLKSolver {
                                 vertex_to_cycle,
                                 visited,
                                 path_stack,
+                                deadline,
+                                budget_exhausted,
                             ) {
                                 return Some(res);
                             }
 
                             path_stack.pop();
                             visited[next_idx] = false;
+                            if *budget_exhausted {
+                                return None;
+                            }
                         }
 
                         // Reverse traversal in next_cycle
@@ -272,12 +416,17 @@ impl ChainedLKSolver {
                                 vertex_to_cycle,
                                 visited,
                                 path_stack,
+                                deadline,
+                                budget_exhausted,
                             ) {
                                 return Some(res);
                             }
 
                             path_stack.pop();
                             visited[next_idx] = false;
+                            if *budget_exhausted {
+                                return None;
+                            }
                         }
                     }
                 }
@@ -286,6 +435,11 @@ impl ChainedLKSolver {
 
         None
     }
+}
+
+#[inline]
+fn deadline_reached(deadline: Option<Instant>) -> bool {
+    deadline.map_or(false, |limit| Instant::now() >= limit)
 }
 
 fn splice_chain(cycles: &[Vec<i32>], path_stack: &[ChainStep]) -> Vec<i32> {
@@ -346,6 +500,7 @@ mod tests {
     use crate::graph::Graph;
     use crate::hub_registry::HubRegistry;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     fn build_test_graph(edges: &[(i32, i32)]) -> Graph {
         let mut g = Graph::new();
@@ -519,5 +674,35 @@ mod tests {
         let patched_clean = ChainedLKSolver::patch_cycles_via_chained_lk(&cycles, &g, &clean_contractor, &hub_registry, 4);
         assert_eq!(patched_clean.len(), 1);
         assert_eq!(patched_clean[0].len(), 16);
+    }
+
+    #[test]
+    fn bounded_chained_lk_stops_before_search_when_deadline_expired() {
+        let g = build_test_graph(&[
+            (1, 2), (2, 3), (3, 1),
+            (4, 5), (5, 6), (6, 4),
+            (7, 8), (8, 9), (9, 7),
+        ]);
+        let cycles = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
+        let contractor = empty_contractor();
+        let hubs = empty_hub_registry();
+        let expired = Instant::now()
+            .checked_sub(Duration::from_secs(1))
+            .expect("Instant must support a one-second look-back");
+
+        let result = ChainedLKSolver::patch_cycles_via_chained_lk_bounded(
+            &cycles,
+            &g,
+            &contractor,
+            &hubs,
+            6,
+            32,
+            expired,
+        );
+
+        assert!(result.budget_exhausted);
+        assert_eq!(result.iterations, 0);
+        assert_eq!(result.cycles, cycles);
+        assert!(!result.round_limit_reached);
     }
 }
