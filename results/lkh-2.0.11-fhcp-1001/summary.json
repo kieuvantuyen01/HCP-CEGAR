@@ -1,0 +1,36 @@
+{
+  "benchmark": "FHCP Challenge Set",
+  "configuration": {
+    "memory_limit_mb": 7168,
+    "runs_parameter": 2000000,
+    "seed": 1,
+    "timeout_seconds": 1800.0
+  },
+  "descriptive_par2_seconds": 2695.9530969030966,
+  "instances": 1001,
+  "outcomes": {
+    "solved_by_100_seconds": 225,
+    "solved_by_10_seconds": 178,
+    "timeout": 745,
+    "verified_satisfiable": 256
+  },
+  "priority_cohorts": {
+    "primary_certificate_cases_solved": 0,
+    "primary_certificate_cases_total": 12,
+    "residual_29_solved": 0,
+    "residual_29_total": 29
+  },
+  "solved_peak_memory_mb": {
+    "maximum": 11.0,
+    "median": 4.0,
+    "p95": 6.0
+  },
+  "solved_runtime_seconds": {
+    "maximum": 1353.76,
+    "median": 1.6,
+    "q1": 0.4,
+    "q3": 14.52
+  },
+  "solver": "LKH",
+  "solver_version": "2.0.11"
+}
